@@ -1,0 +1,23 @@
+# permissions for end users to view awsiamprovisions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: aws-iam-provisioner
+    app.kubernetes.io/managed-by: kustomize
+  name: awsiamprovision-viewer-role
+rules:
+- apiGroups:
+  - iam.aws.edenlab.io
+  resources:
+  - awsiamprovisions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - iam.aws.edenlab.io
+  resources:
+  - awsiamprovisions/status
+  verbs:
+  - get
