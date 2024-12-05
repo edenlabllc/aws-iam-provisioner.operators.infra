@@ -23,23 +23,47 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+type AWSIAMProvisionPolicySpec struct {
+	PolicyDocument string `json:"policyDocument"`
+}
+
+type AWSIAMProvisionPolicy struct {
+	Spec AWSIAMProvisionPolicySpec `json:"spec"`
+}
+
+type AWSIAMProvisionRoleSpec struct {
+	AssumeRolePolicyDocument string `json:"assumeRolePolicyDocument"`
+	MaxSessionDuration       int64  `json:"maxSessionDuration"`
+}
+
+type AWSIAMProvisionRole struct {
+	Spec AWSIAMProvisionRoleSpec `json:"spec"`
+}
+
 // AWSIAMProvisionSpec defines the desired state of AWSIAMProvision.
 type AWSIAMProvisionSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of AWSIAMProvision. Edit awsiamprovision_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	EksClusterName string                           `json:"eksClusterName"`
+	Role           map[string]AWSIAMProvisionRole   `json:"role"`
+	Policies       map[string]AWSIAMProvisionPolicy `json:"policies"`
 }
 
 // AWSIAMProvisionStatus defines the observed state of AWSIAMProvision.
 type AWSIAMProvisionStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	Error           string       `json:"error,omitempty"`
+	LastUpdatedTime *metav1.Time `json:"lastUpdatedTime,omitempty"`
+	Phase           string       `json:"phase,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="PHASE",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="LAST-UPDATED-TIME",type=string,JSONPath=".status.lastUpdatedTime"
 
 // AWSIAMProvision is the Schema for the awsiamprovisions API.
 type AWSIAMProvision struct {

@@ -18,19 +18,25 @@ package controller
 
 import (
 	"context"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"time"
 
 	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
+	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
+)
+
+const (
+	frequency = time.Second * 10
 )
 
 // AWSIAMProvisionReconciler reconciles a AWSIAMProvision object
 type AWSIAMProvisionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	rm     *ReconciliationManager
 }
 
 // +kubebuilder:rbac:groups=iam.aws.edenlab.io,resources=awsiamprovisions,verbs=get;list;watch;create;update;patch;delete
@@ -39,25 +45,45 @@ type AWSIAMProvisionReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the AWSIAMProvision object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/reconcile
 func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	rm := NewReconciliationManager(r, &ctx, &req)
 
-	// TODO(user): your logic here
+	awsIAMProvision, eksControlPlane, err := rm.GetClusterResources()
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
-	return ctrl.Result{}, nil
+	var policies []*iamctrlv1alpha1.Policy
+	for name, item := range awsIAMProvision.Spec.Policies {
+		k8sResource, err := rm.HandlePolicy(awsIAMProvision, name, &item)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		policies = append(policies, k8sResource)
+	}
+
+	for name, item := range awsIAMProvision.Spec.Role {
+		_, err := rm.HandleRole(awsIAMProvision, eksControlPlane, policies, name, &item)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if err := rm.UpdateCRDStatus(awsIAMProvision, "Provisioned", ""); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{RequeueAfter: frequency}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AWSIAMProvisionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&iamv1alpha1.AWSIAMProvision{}).
-		Named("awsiamprovision").
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
 }
