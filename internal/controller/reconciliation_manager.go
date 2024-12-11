@@ -9,6 +9,7 @@ import (
 	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
 	ackv1alpha1 "github.com/aws-controllers-k8s/runtime/apis/core/v1alpha1"
 	"github.com/go-logr/logr"
+	"github.com/google/go-cmp/cmp"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -21,10 +22,6 @@ import (
 )
 
 var (
-	policyMeta = metav1.TypeMeta{
-		APIVersion: "iam.services.k8s.aws",
-		Kind:       "Policy",
-	}
 	roleMeta = metav1.TypeMeta{
 		APIVersion: "iam.services.k8s.aws",
 		Kind:       "Role",
@@ -97,62 +94,7 @@ func (rm *ReconciliationManager) GetClusterResources() (*iamv1alpha1.AWSIAMProvi
 	return awsIAMProvision, eksControlPlane, nil
 }
 
-func (rm *ReconciliationManager) HandlePolicy(awsIAMProvision *iamv1alpha1.AWSIAMProvision, name string, item *iamv1alpha1.AWSIAMProvisionPolicy) (*iamctrlv1alpha1.Policy, error) {
-	k8sResource := &iamctrlv1alpha1.Policy{}
-	k8sResourceNamespacedName := types.NamespacedName{Name: name, Namespace: rm.req.NamespacedName.Namespace}
-
-	if err := rm.r.Client.Get(*rm.ctx, k8sResourceNamespacedName, k8sResource); err != nil {
-		if k8serrors.IsNotFound(err) {
-			// Create new policy
-			k8sResource.TypeMeta = policyMeta
-			k8sResource.ObjectMeta = metav1.ObjectMeta{
-				Name:      name,
-				Namespace: rm.req.NamespacedName.Namespace,
-			}
-			k8sResource.Spec.PolicyDocument = &item.Spec.PolicyDocument
-			k8sResource.Spec.Name = &name
-
-			// Used to ensure that the created resource will be deleted when the custom resource object is removed
-			if err := ctrl.SetControllerReference(awsIAMProvision, k8sResource, rm.r.Scheme); err != nil {
-				if err := rm.UpdateCRDStatus(awsIAMProvision, "Error", err.Error()); err != nil {
-					return nil, err
-				}
-
-				return nil, err
-			}
-
-			if err = rm.r.Client.Create(*rm.ctx, k8sResource); err != nil {
-				if err := rm.UpdateCRDStatus(awsIAMProvision, "Error", err.Error()); err != nil {
-					return nil, err
-				}
-
-				return nil, err
-			}
-
-			rm.logger.Info(fmt.Sprintf("Created IAM Policy: %s", k8sResourceNamespacedName))
-		} else {
-			return nil, err
-		}
-	} else {
-		rm.logger.Info(*k8sResource.Spec.PolicyDocument)
-		rm.logger.Info(item.Spec.PolicyDocument)
-
-		if k8sResource.Spec.PolicyDocument != &item.Spec.PolicyDocument {
-			// Update policy with new values
-			k8sResource.Spec.PolicyDocument = &item.Spec.PolicyDocument
-
-			if err := rm.r.Client.Update(*rm.ctx, k8sResource); err != nil {
-				return nil, err
-			}
-
-			rm.logger.Info(fmt.Sprintf("Updated IAM Policy: %s", k8sResourceNamespacedName))
-		}
-	}
-
-	return k8sResource, nil
-}
-
-func (rm *ReconciliationManager) HandleRole(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, policies []*iamctrlv1alpha1.Policy, name string, item *iamv1alpha1.AWSIAMProvisionRole) (*iamctrlv1alpha1.Role, error) {
+func (rm *ReconciliationManager) HandleRole(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, name string, item *iamv1alpha1.AWSIAMProvisionRole) (*iamctrlv1alpha1.Role, error) {
 	k8sResource := &iamctrlv1alpha1.Role{}
 	k8sResourceNamespacedName := types.NamespacedName{Name: name, Namespace: rm.req.NamespacedName.Namespace}
 
@@ -177,16 +119,22 @@ func (rm *ReconciliationManager) HandleRole(awsIAMProvision *iamv1alpha1.AWSIAMP
 				Name:      name,
 				Namespace: rm.req.NamespacedName.Namespace,
 			}
+			k8sResource.Spec = item.Spec
 
-			assumeRolePolicyDocument, err := rm.renderOIDCProviderTemplate(item.Spec.AssumeRolePolicyDocument, oidcProviderArn, oidcProviderName)
+			assumeRolePolicyDocument, err := rm.renderOIDCProviderTemplate(*item.Spec.AssumeRolePolicyDocument, oidcProviderArn, oidcProviderName)
 			if err != nil {
+				if err := rm.UpdateCRDStatus(awsIAMProvision, "Error", err.Error()); err != nil {
+					return nil, err
+				}
+
 				return nil, err
 			}
 
 			k8sResource.Spec.AssumeRolePolicyDocument = &assumeRolePolicyDocument
-			k8sResource.Spec.MaxSessionDuration = &item.Spec.MaxSessionDuration
-			k8sResource.Spec.Name = &name
-			k8sResource.Spec.PolicyRefs = rm.transformPoliciesToRefs(policies)
+
+			if err := rm.handleRolePolicyRefs(awsIAMProvision, item, k8sResource); err != nil {
+				return nil, err
+			}
 
 			// Used to ensure that the created resource will be deleted when the custom resource object is removed
 			if err := ctrl.SetControllerReference(awsIAMProvision, k8sResource, rm.r.Scheme); err != nil {
@@ -211,24 +159,66 @@ func (rm *ReconciliationManager) HandleRole(awsIAMProvision *iamv1alpha1.AWSIAMP
 		}
 	} else {
 		// Update role with new values
-		assumeRolePolicyDocument, err := rm.renderOIDCProviderTemplate(item.Spec.AssumeRolePolicyDocument, oidcProviderArn, oidcProviderName)
+		k8sResource.Spec = item.Spec
+
+		assumeRolePolicyDocument, err := rm.renderOIDCProviderTemplate(*item.Spec.AssumeRolePolicyDocument, oidcProviderArn, oidcProviderName)
 		if err != nil {
+			if err := rm.UpdateCRDStatus(awsIAMProvision, "Error", err.Error()); err != nil {
+				return nil, err
+			}
+
 			return nil, err
 		}
 
-		if k8sResource.Spec.AssumeRolePolicyDocument != &assumeRolePolicyDocument ||
-			k8sResource.Spec.MaxSessionDuration != &item.Spec.MaxSessionDuration ||
-			len(k8sResource.Spec.PolicyRefs) != len(policies) { // todo check policy refs differ
-			k8sResource.Spec.AssumeRolePolicyDocument = &assumeRolePolicyDocument
-			k8sResource.Spec.MaxSessionDuration = &item.Spec.MaxSessionDuration
-			k8sResource.Spec.PolicyRefs = rm.transformPoliciesToRefs(policies)
+		k8sResource.Spec.AssumeRolePolicyDocument = &assumeRolePolicyDocument
 
+		if err := rm.handleRolePolicyRefs(awsIAMProvision, item, k8sResource); err != nil {
+			return nil, err
+		}
+
+		if !cmp.Equal(item.Spec, k8sResource.Spec) {
 			if err := rm.r.Client.Update(*rm.ctx, k8sResource); err != nil {
 				return nil, err
 			}
 
 			rm.logger.Info(fmt.Sprintf("Updated IAM Role: %s", k8sResourceNamespacedName))
 		}
+	}
+
+	return k8sResource, nil
+}
+
+func (rm *ReconciliationManager) handleRolePolicyRefs(awsIAMProvision *iamv1alpha1.AWSIAMProvision, item *iamv1alpha1.AWSIAMProvisionRole, k8sResource *iamctrlv1alpha1.Role) error {
+	for _, policyRef := range item.Spec.PolicyRefs {
+		// Check IAM policy exists
+		_, err := rm.getPolicy(awsIAMProvision, policyRef)
+
+		if err != nil {
+			if err := rm.UpdateCRDStatus(awsIAMProvision, "Error", err.Error()); err != nil {
+				return err
+			}
+
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (rm *ReconciliationManager) getPolicy(awsIAMProvision *iamv1alpha1.AWSIAMProvision, policyRef *ackv1alpha1.AWSResourceReferenceWrapper) (*iamctrlv1alpha1.Policy, error) {
+	k8sResource := &iamctrlv1alpha1.Policy{}
+	k8sResourceNamespacedName := types.NamespacedName{Name: *policyRef.From.Name, Namespace: *policyRef.From.Namespace}
+
+	if err := rm.r.Client.Get(*rm.ctx, k8sResourceNamespacedName, k8sResource); err != nil {
+		if k8serrors.IsNotFound(err) {
+			err = errors.New(fmt.Sprintf("Cannot get IAM Policy: %s", k8sResourceNamespacedName))
+		}
+
+		if err := rm.UpdateCRDStatus(awsIAMProvision, "Error", err.Error()); err != nil {
+			return nil, err
+		}
+
+		return nil, err
 	}
 
 	return k8sResource, nil

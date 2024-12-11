@@ -17,27 +17,15 @@ limitations under the License.
 package v1alpha1
 
 import (
+	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-type AWSIAMProvisionPolicySpec struct {
-	PolicyDocument string `json:"policyDocument"`
-}
-
-type AWSIAMProvisionPolicy struct {
-	Spec AWSIAMProvisionPolicySpec `json:"spec"`
-}
-
-type AWSIAMProvisionRoleSpec struct {
-	AssumeRolePolicyDocument string `json:"assumeRolePolicyDocument"`
-	MaxSessionDuration       int64  `json:"maxSessionDuration"`
-}
-
 type AWSIAMProvisionRole struct {
-	Spec AWSIAMProvisionRoleSpec `json:"spec"`
+	Spec iamctrlv1alpha1.RoleSpec `json:"spec"`
 }
 
 // AWSIAMProvisionSpec defines the desired state of AWSIAMProvision.
@@ -45,9 +33,8 @@ type AWSIAMProvisionSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	EksClusterName string                           `json:"eksClusterName"`
-	Role           map[string]AWSIAMProvisionRole   `json:"role"`
-	Policies       map[string]AWSIAMProvisionPolicy `json:"policies"`
+	EksClusterName string                         `json:"eksClusterName"`
+	Role           map[string]AWSIAMProvisionRole `json:"role"`
 }
 
 // AWSIAMProvisionStatus defines the observed state of AWSIAMProvision.

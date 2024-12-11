@@ -25,7 +25,6 @@ import (
 	"time"
 
 	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
-	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
 )
 
 const (
@@ -56,18 +55,8 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
-	var policies []*iamctrlv1alpha1.Policy
-	for name, item := range awsIAMProvision.Spec.Policies {
-		k8sResource, err := rm.HandlePolicy(awsIAMProvision, name, &item)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-
-		policies = append(policies, k8sResource)
-	}
-
 	for name, item := range awsIAMProvision.Spec.Role {
-		_, err := rm.HandleRole(awsIAMProvision, eksControlPlane, policies, name, &item)
+		_, err := rm.HandleRole(awsIAMProvision, eksControlPlane, name, &item)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -76,6 +65,8 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := rm.UpdateCRDStatus(awsIAMProvision, "Provisioned", ""); err != nil {
 		return ctrl.Result{}, err
 	}
+
+	// todo partial update statuses?
 
 	return ctrl.Result{RequeueAfter: frequency}, nil
 }
