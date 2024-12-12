@@ -56,18 +56,29 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	if awsIAMProvision == nil || eksControlPlane == nil {
+		// Resources not ready, re-queuing
 		return ctrl.Result{RequeueAfter: frequency}, nil
 	}
 
+	provisioned := false
 	for name, item := range awsIAMProvision.Spec.Role {
-		_, err := rm.HandleRole(awsIAMProvision, eksControlPlane, name, &item)
+		k8sResource, err := rm.HandleRole(awsIAMProvision, eksControlPlane, name, &item)
+
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+
+		if k8sResource != nil {
+			// If a resource has been returned, there was a change to it
+			provisioned = true
+		}
 	}
 
-	if err := rm.UpdateCRDStatus(awsIAMProvision, "Provisioned", ""); err != nil {
-		return ctrl.Result{}, err
+	if provisioned {
+		// Resources have been provisioned, updating status
+		if err := rm.UpdateCRDStatus(awsIAMProvision, "Provisioned", ""); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{RequeueAfter: frequency}, nil
