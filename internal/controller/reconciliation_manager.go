@@ -32,8 +32,8 @@ var (
 )
 
 type oidcProviderTemplateData struct {
-	oidcProviderARN  string
-	oidcProviderName string
+	OIDCProviderARN  string
+	OIDCProviderName string
 }
 
 type ReconciliationManager struct {

@@ -18,12 +18,12 @@ spec:
                 "Sid": "",
                 "Effect": "Allow",
                 "Principal": {
-                  "Federated": "{{ .oidcProviderARN }}"
+                  "Federated": "{{ .OIDCProviderARN }}"
                 },
                 "Action": "sts:AssumeRoleWithWebIdentity",
                 "Condition": {
                   "StringEquals": {
-                      "{{ .oidcProviderName }}:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
+                      "{{ .OIDCProviderName }}:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
                   }
                 }
               }
