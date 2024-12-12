@@ -18,18 +18,26 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
+)
+
+const (
+	frequency = time.Second * 10
 )
 
 // AWSIAMProvisionReconciler reconciles a AWSIAMProvision object
 type AWSIAMProvisionReconciler struct {
 	client.Client
+	*ReconciliationManager
 	Scheme *runtime.Scheme
 }
 
@@ -39,25 +47,54 @@ type AWSIAMProvisionReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the AWSIAMProvision object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/reconcile
 func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-	// TODO(user): your logic here
+	r.ReconciliationManager = &ReconciliationManager{&ctx, r.Client, &logger, &req, r.Scheme, r.Status()}
 
-	return ctrl.Result{}, nil
+	awsIAMProvision, eksControlPlane, err := r.getClusterResources()
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if awsIAMProvision == nil || eksControlPlane == nil {
+		// Resources not ready, re-queuing
+		return ctrl.Result{RequeueAfter: frequency}, nil
+	}
+
+	provisioned := false
+	for name, item := range awsIAMProvision.Spec.Roles {
+		k8sResource, err := r.handleRole(awsIAMProvision, eksControlPlane, name, &item)
+
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if k8sResource != nil {
+			// If a resource has been returned, there was a change to it
+			provisioned = true
+		}
+	}
+
+	if awsIAMProvision.Status.Phase != "Provisioned" || provisioned {
+		// Resources have been provisioned successfully
+		r.logger.Info(fmt.Sprintf("AWSIAMProvision provisioned: %s", r.request.NamespacedName))
+
+		if err := r.updateCRDStatus(awsIAMProvision, "Provisioned", ""); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return ctrl.Result{RequeueAfter: frequency}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AWSIAMProvisionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&iamv1alpha1.AWSIAMProvision{}).
-		Named("awsiamprovision").
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
 }

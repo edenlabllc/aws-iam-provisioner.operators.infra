@@ -17,29 +17,37 @@ limitations under the License.
 package v1alpha1
 
 import (
+	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+
+type AWSIAMProvisionRole struct {
+	Spec iamctrlv1alpha1.RoleSpec `json:"spec"`
+}
 
 // AWSIAMProvisionSpec defines the desired state of AWSIAMProvision.
 type AWSIAMProvisionSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of AWSIAMProvision. Edit awsiamprovision_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	EksClusterName string                         `json:"eksClusterName"`
+	Roles          map[string]AWSIAMProvisionRole `json:"roles"`
 }
 
 // AWSIAMProvisionStatus defines the observed state of AWSIAMProvision.
 type AWSIAMProvisionStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	Message         string       `json:"message,omitempty"`
+	LastUpdatedTime *metav1.Time `json:"lastUpdatedTime,omitempty"`
+	Phase           string       `json:"phase,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="PHASE",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="LAST-UPDATED-TIME",type=string,JSONPath=".status.lastUpdatedTime"
 
 // AWSIAMProvision is the Schema for the awsiamprovisions API.
 type AWSIAMProvision struct {

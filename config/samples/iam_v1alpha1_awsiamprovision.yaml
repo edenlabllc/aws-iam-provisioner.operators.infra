@@ -4,6 +4,38 @@ metadata:
   labels:
     app.kubernetes.io/name: aws-iam-provisioner
     app.kubernetes.io/managed-by: kustomize
-  name: awsiamprovision-sample
+  name: deps-ffs-1
 spec:
-  # TODO(user): Add fields here
+  eksClusterName: deps-ffs-1
+  roles:
+    deps-ffs-1-ebs-csi-controller:
+      spec:
+        assumeRolePolicyDocument: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "",
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "{{ .OIDCProviderARN }}"
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                      "{{ .OIDCProviderName }}:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
+                  }
+                }
+              }
+            ]
+          }
+        maxSessionDuration: 3600
+        name: deps-ffs-1-ebs-csi-controller
+        path: /
+        policyRefs:
+          - from:
+              name: deps-ffs-1-ebs-csi-controller-core
+              namespace: capa-system
+          - from:
+              name: deps-ffs-1-ebs-csi-controller-kms
+              namespace: capa-system
