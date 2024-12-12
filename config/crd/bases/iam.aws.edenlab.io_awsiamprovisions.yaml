@@ -48,7 +48,7 @@ spec:
             properties:
               eksClusterName:
                 type: string
-              role:
+              roles:
                 additionalProperties:
                   properties:
                     spec:
@@ -222,7 +222,7 @@ spec:
                 type: object
             required:
             - eksClusterName
-            - role
+            - roles
             type: object
           status:
             description: AWSIAMProvisionStatus defines the observed state of AWSIAMProvision.

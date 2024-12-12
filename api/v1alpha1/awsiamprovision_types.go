@@ -34,7 +34,7 @@ type AWSIAMProvisionSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	EksClusterName string                         `json:"eksClusterName"`
-	Role           map[string]AWSIAMProvisionRole `json:"role"`
+	Roles          map[string]AWSIAMProvisionRole `json:"roles"`
 }
 
 // AWSIAMProvisionStatus defines the observed state of AWSIAMProvision.

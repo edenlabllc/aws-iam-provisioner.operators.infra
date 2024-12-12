@@ -4,10 +4,10 @@ metadata:
   labels:
     app.kubernetes.io/name: aws-iam-provisioner
     app.kubernetes.io/managed-by: kustomize
-  name: deps-ffs-1-ebs-csi-controller
+  name: deps-ffs-1
 spec:
   eksClusterName: deps-ffs-1
-  role:
+  roles:
     deps-ffs-1-ebs-csi-controller:
       spec:
         assumeRolePolicyDocument: |

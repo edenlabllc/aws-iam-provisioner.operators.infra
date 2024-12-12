@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -61,7 +62,7 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	provisioned := false
-	for name, item := range awsIAMProvision.Spec.Role {
+	for name, item := range awsIAMProvision.Spec.Roles {
 		k8sResource, err := rm.HandleRole(awsIAMProvision, eksControlPlane, name, &item)
 
 		if err != nil {
@@ -74,8 +75,10 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	if provisioned {
-		// Resources have been provisioned, updating status
+	if awsIAMProvision.Status.Phase != "Provisioned" || provisioned {
+		// Resources have been provisioned successfully
+		rm.logger.Info(fmt.Sprintf("AWSIAMProvision provisioned: %s", rm.req.NamespacedName))
+
 		if err := rm.UpdateCRDStatus(awsIAMProvision, "Provisioned", ""); err != nil {
 			return ctrl.Result{}, err
 		}
