@@ -56,7 +56,7 @@ func (rm *ReconciliationManager) GetClusterResources() (*iamv1alpha1.AWSIAMProvi
 
 	if err := rm.r.Client.Get(*rm.ctx, rm.req.NamespacedName, awsIAMProvision); err != nil {
 		if k8serrors.IsNotFound(err) {
-			rm.logger.Info(fmt.Sprintf("Cannot find AWSIAMProvision: %s", rm.req.NamespacedName))
+			rm.logger.Info(fmt.Sprintf("AWSIAMProvision not found: %s", rm.req.NamespacedName))
 
 			return nil, nil, nil
 		}
@@ -64,14 +64,14 @@ func (rm *ReconciliationManager) GetClusterResources() (*iamv1alpha1.AWSIAMProvi
 		return nil, nil, err
 	}
 
-	rm.logger.Info(fmt.Sprintf("Got AWSIAMProvision: %s", rm.req.NamespacedName))
+	rm.logger.Info(fmt.Sprintf("AWSIAMProvision found: %s", rm.req.NamespacedName))
 
 	eksControlPlane := &ekscontrolplanev1.AWSManagedControlPlane{}
-	eksControlPlaneNamespacedName := types.NamespacedName{Name: awsIAMProvision.Spec.EksClusterName, Namespace: rm.req.NamespacedName.Namespace}
+	namespacedName := types.NamespacedName{Name: awsIAMProvision.Spec.EksClusterName, Namespace: rm.req.NamespacedName.Namespace}
 
-	if err := rm.r.Client.Get(*rm.ctx, eksControlPlaneNamespacedName, eksControlPlane); err != nil {
+	if err := rm.r.Client.Get(*rm.ctx, namespacedName, eksControlPlane); err != nil {
 		if k8serrors.IsNotFound(err) {
-			msg := fmt.Sprintf("Cannot get AWSManagedControlPlane: %s", eksControlPlaneNamespacedName)
+			msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not found: %s", rm.req.NamespacedName, namespacedName)
 			rm.logger.Info(msg)
 
 			if err := rm.UpdateCRDStatus(awsIAMProvision, "Provisioning", msg); err != nil {
@@ -88,10 +88,10 @@ func (rm *ReconciliationManager) GetClusterResources() (*iamv1alpha1.AWSIAMProvi
 		return nil, nil, err
 	}
 
-	rm.logger.Info(fmt.Sprintf("Got AWSManagedControlPlane: %s", eksControlPlaneNamespacedName))
+	rm.logger.Info(fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision found: %s", rm.req.NamespacedName, namespacedName))
 
 	if !eksControlPlane.Status.Ready {
-		msg := fmt.Sprintf("AWSManagedControlPlane not ready: %s", eksControlPlaneNamespacedName)
+		msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not ready: %s", rm.req.NamespacedName, namespacedName)
 		rm.logger.Info(msg)
 
 		if err := rm.UpdateCRDStatus(awsIAMProvision, "Provisioning", msg); err != nil {
@@ -106,9 +106,9 @@ func (rm *ReconciliationManager) GetClusterResources() (*iamv1alpha1.AWSIAMProvi
 
 func (rm *ReconciliationManager) HandleRole(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, name string, item *iamv1alpha1.AWSIAMProvisionRole) (*iamctrlv1alpha1.Role, error) {
 	k8sResource := &iamctrlv1alpha1.Role{}
-	k8sResourceNamespacedName := types.NamespacedName{Name: name, Namespace: rm.req.NamespacedName.Namespace}
+	namespacedName := types.NamespacedName{Name: name, Namespace: rm.req.NamespacedName.Namespace}
 
-	if err := rm.r.Client.Get(*rm.ctx, k8sResourceNamespacedName, k8sResource); err != nil {
+	if err := rm.r.Client.Get(*rm.ctx, namespacedName, k8sResource); err != nil {
 		if k8serrors.IsNotFound(err) {
 			// Create new role
 			if err := rm.setAssumeRolePolicyDocument(awsIAMProvision, eksControlPlane, item); err != nil {
@@ -143,7 +143,7 @@ func (rm *ReconciliationManager) HandleRole(awsIAMProvision *iamv1alpha1.AWSIAMP
 				return nil, err
 			}
 
-			rm.logger.Info(fmt.Sprintf("Created IAM Role: %s", k8sResourceNamespacedName))
+			rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision created: %s", rm.req.NamespacedName, namespacedName))
 
 			return k8sResource, nil
 		}
@@ -171,15 +171,15 @@ func (rm *ReconciliationManager) HandleRole(awsIAMProvision *iamv1alpha1.AWSIAMP
 		return nil, err
 	}
 
-	rm.logger.Info(fmt.Sprintf("Updated IAM Role: %s", k8sResourceNamespacedName))
+	rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision updated: %s", rm.req.NamespacedName, namespacedName))
 
 	return k8sResource, nil
 }
 
-func (rm *ReconciliationManager) UpdateCRDStatus(awsIAMProvision *iamv1alpha1.AWSIAMProvision, phase, errText string) error {
+func (rm *ReconciliationManager) UpdateCRDStatus(awsIAMProvision *iamv1alpha1.AWSIAMProvision, phase, message string) error {
 	awsIAMProvision.Status.LastUpdatedTime = &metav1.Time{Time: time.Now()}
 	awsIAMProvision.Status.Phase = phase
-	awsIAMProvision.Status.Error = errText
+	awsIAMProvision.Status.Message = message
 
 	if err := rm.r.Status().Update(*rm.ctx, awsIAMProvision); err != nil {
 		return errors.New(fmt.Sprintf("Unable to update status for CRD: %s", awsIAMProvision.Name))
@@ -191,7 +191,7 @@ func (rm *ReconciliationManager) UpdateCRDStatus(awsIAMProvision *iamv1alpha1.AW
 func (rm *ReconciliationManager) validateRolePolicyRefs(awsIAMProvision *iamv1alpha1.AWSIAMProvision, item *iamv1alpha1.AWSIAMProvisionRole) error {
 	for _, policyRef := range item.Spec.PolicyRefs {
 		// Check IAM policy exists
-		_, err := rm.getPolicy(awsIAMProvision, policyRef)
+		_, err := rm.getPolicy(awsIAMProvision, item, policyRef)
 
 		if err != nil {
 			if err := rm.UpdateCRDStatus(awsIAMProvision, "Failed", err.Error()); err != nil {
@@ -205,13 +205,13 @@ func (rm *ReconciliationManager) validateRolePolicyRefs(awsIAMProvision *iamv1al
 	return nil
 }
 
-func (rm *ReconciliationManager) getPolicy(awsIAMProvision *iamv1alpha1.AWSIAMProvision, policyRef *ackv1alpha1.AWSResourceReferenceWrapper) (*iamctrlv1alpha1.Policy, error) {
+func (rm *ReconciliationManager) getPolicy(awsIAMProvision *iamv1alpha1.AWSIAMProvision, item *iamv1alpha1.AWSIAMProvisionRole, policyRef *ackv1alpha1.AWSResourceReferenceWrapper) (*iamctrlv1alpha1.Policy, error) {
 	k8sResource := &iamctrlv1alpha1.Policy{}
-	k8sResourceNamespacedName := types.NamespacedName{Name: *policyRef.From.Name, Namespace: *policyRef.From.Namespace}
+	namespacedName := types.NamespacedName{Name: *policyRef.From.Name, Namespace: *policyRef.From.Namespace}
 
-	if err := rm.r.Client.Get(*rm.ctx, k8sResourceNamespacedName, k8sResource); err != nil {
+	if err := rm.r.Client.Get(*rm.ctx, namespacedName, k8sResource); err != nil {
 		if k8serrors.IsNotFound(err) {
-			err = errors.New(fmt.Sprintf("Cannot get IAM Policy: %s", k8sResourceNamespacedName))
+			err = errors.New(fmt.Sprintf("IAM Policy of %s IAM Role of %s AWSIAMProvision not found: %s", *item.Spec.Name, rm.req.NamespacedName, namespacedName))
 		}
 
 		if err := rm.UpdateCRDStatus(awsIAMProvision, "Failed", err.Error()); err != nil {
@@ -229,7 +229,8 @@ func (rm *ReconciliationManager) setAssumeRolePolicyDocument(awsIAMProvision *ia
 	_, oidcProviderName, oidcProviderARNFound := strings.Cut(oidcProviderARN, "/")
 
 	if !oidcProviderARNFound {
-		err := errors.New(fmt.Sprintf("OIDC ARN malformed: %s", oidcProviderARN))
+		namespacedName := types.NamespacedName{Name: awsIAMProvision.Spec.EksClusterName, Namespace: rm.req.NamespacedName.Namespace}
+		err := errors.New(fmt.Sprintf("OIDC ARN of %s AWSManagedControlPlane of %s AWSIAMProvision malformed: %s", namespacedName, rm.req.NamespacedName, oidcProviderARN))
 
 		if err := rm.UpdateCRDStatus(awsIAMProvision, "Failed", err.Error()); err != nil {
 			return err

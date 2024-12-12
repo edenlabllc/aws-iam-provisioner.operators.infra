@@ -227,10 +227,10 @@ spec:
           status:
             description: AWSIAMProvisionStatus defines the observed state of AWSIAMProvision.
             properties:
-              error:
-                type: string
               lastUpdatedTime:
                 format: date-time
+                type: string
+              message:
                 type: string
               phase:
                 type: string

@@ -42,7 +42,7 @@ type AWSIAMProvisionStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	Error           string       `json:"error,omitempty"`
+	Message         string       `json:"message,omitempty"`
 	LastUpdatedTime *metav1.Time `json:"lastUpdatedTime,omitempty"`
 	Phase           string       `json:"phase,omitempty"`
 }
