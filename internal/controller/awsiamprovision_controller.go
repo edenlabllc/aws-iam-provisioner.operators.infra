@@ -37,7 +37,7 @@ const (
 // AWSIAMProvisionReconciler reconciles a AWSIAMProvision object
 type AWSIAMProvisionReconciler struct {
 	client.Client
-	*reconciliationManager
+	*ReconciliationManager
 	Scheme *runtime.Scheme
 }
 
@@ -54,8 +54,11 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	logger := log.FromContext(ctx)
 
 	r.context = &ctx
+	r.client = r.Client
 	r.logger = &logger
 	r.request = &req
+	r.scheme = r.Scheme
+	r.status = r.Status()
 
 	awsIAMProvision, eksControlPlane, err := r.getClusterResources()
 	if err != nil {
