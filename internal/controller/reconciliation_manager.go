@@ -1,11 +1,15 @@
 package controller
 
 import (
-	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"text/template"
+	"time"
+
+	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
 	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
 	ackv1alpha1 "github.com/aws-controllers-k8s/runtime/apis/core/v1alpha1"
 	"github.com/go-logr/logr"
@@ -16,9 +20,6 @@ import (
 	ekscontrolplanev1 "sigs.k8s.io/cluster-api-provider-aws/v2/controlplane/eks/api/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"strings"
-	"text/template"
-	"time"
 )
 
 var (
