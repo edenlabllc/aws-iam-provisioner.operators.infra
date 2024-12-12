@@ -53,12 +53,7 @@ type AWSIAMProvisionReconciler struct {
 func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	r.context = &ctx
-	r.client = r.Client
-	r.logger = &logger
-	r.request = &req
-	r.scheme = r.Scheme
-	r.status = r.Status()
+	r.ReconciliationManager = &ReconciliationManager{&ctx, r.Client, &logger, &req, r.Scheme, r.Status()}
 
 	awsIAMProvision, eksControlPlane, err := r.getClusterResources()
 	if err != nil {
