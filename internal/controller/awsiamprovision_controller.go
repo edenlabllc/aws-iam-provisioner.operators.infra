@@ -55,6 +55,10 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
+	if awsIAMProvision == nil || eksControlPlane == nil {
+		return ctrl.Result{RequeueAfter: frequency}, nil
+	}
+
 	for name, item := range awsIAMProvision.Spec.Role {
 		_, err := rm.HandleRole(awsIAMProvision, eksControlPlane, name, &item)
 		if err != nil {
@@ -65,8 +69,6 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := rm.UpdateCRDStatus(awsIAMProvision, "Provisioned", ""); err != nil {
 		return ctrl.Result{}, err
 	}
-
-	// todo partial update statuses?
 
 	return ctrl.Result{RequeueAfter: frequency}, nil
 }
