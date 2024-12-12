@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,8 +37,8 @@ const (
 // AWSIAMProvisionReconciler reconciles a AWSIAMProvision object
 type AWSIAMProvisionReconciler struct {
 	client.Client
+	*reconciliationManager
 	Scheme *runtime.Scheme
-	rm     *ReconciliationManager
 }
 
 // +kubebuilder:rbac:groups=iam.aws.edenlab.io,resources=awsiamprovisions,verbs=get;list;watch;create;update;patch;delete
@@ -50,9 +51,13 @@ type AWSIAMProvisionReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/reconcile
 func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	rm := NewReconciliationManager(r, &ctx, &req)
+	logger := log.FromContext(ctx)
 
-	awsIAMProvision, eksControlPlane, err := rm.GetClusterResources()
+	r.context = &ctx
+	r.logger = &logger
+	r.request = &req
+
+	awsIAMProvision, eksControlPlane, err := r.getClusterResources()
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -64,7 +69,7 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	provisioned := false
 	for name, item := range awsIAMProvision.Spec.Roles {
-		k8sResource, err := rm.HandleRole(awsIAMProvision, eksControlPlane, name, &item)
+		k8sResource, err := r.handleRole(awsIAMProvision, eksControlPlane, name, &item)
 
 		if err != nil {
 			return ctrl.Result{}, err
@@ -78,9 +83,9 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if awsIAMProvision.Status.Phase != "Provisioned" || provisioned {
 		// Resources have been provisioned successfully
-		rm.logger.Info(fmt.Sprintf("AWSIAMProvision provisioned: %s", rm.req.NamespacedName))
+		r.logger.Info(fmt.Sprintf("AWSIAMProvision provisioned: %s", r.request.NamespacedName))
 
-		if err := rm.UpdateCRDStatus(awsIAMProvision, "Provisioned", ""); err != nil {
+		if err := r.updateCRDStatus(awsIAMProvision, "Provisioned", ""); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
