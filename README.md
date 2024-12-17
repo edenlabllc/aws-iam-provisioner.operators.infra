@@ -1,19 +1,20 @@
 # aws-iam-provisioner
 
-The AWS IAM provisioner operator provisions IAM roles on the fly for the Kubernetes clusters 
+The AWS IAM provisioner operator provisions IAM roles on the fly for the Kubernetes clusters
 managed using [Kubernetes Cluster API Provider AWS](https://cluster-api-aws.sigs.k8s.io/getting-started).
 
 ## Description
 
-After a managed [AWS EKS](https://aws.amazon.com/eks/) cluster is provisioned using 
-[Kubernetes Cluster API Provider AWS](https://cluster-api-aws.sigs.k8s.io/getting-started), it might be required 
-to provision IAM roles and policies for the installed services, 
-e.g. [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/), 
+After a managed [AWS EKS](https://aws.amazon.com/eks/) cluster is provisioned using
+[Kubernetes Cluster API Provider AWS](https://cluster-api-aws.sigs.k8s.io/getting-started), it might be required
+to provision IAM roles and policies for the installed services,
+e.g. [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/),
 [AWS Elastic Block Store CSI driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/tree/master).
 
-For Kubernetes-based resource provisioning, [AWS Controllers for Kubernetes](https://aws-controllers-k8s.github.io/community/)
-can be used to provision IAM [policies](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/policy/) 
-and [roles](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/). 
+For Kubernetes-based resource
+provisioning, [AWS Controllers for Kubernetes](https://aws-controllers-k8s.github.io/community/)
+can be used to provision IAM [policies](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/policy/)
+and [roles](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/).
 Custom resources (CRs) for the controller might look like the following:
 
 ```yaml
@@ -40,11 +41,14 @@ spec:
   # truncated
 ```
 
-While a CR of an IAM policy is a static definition, which can be defined in advance, a CR of an IAM role might contain 
-dynamic parts such as OIDC ARN/name of a created EKS cluster. It means, that while a role can reference existing policies,
-the dynamic parts should be provisioned on the fly, upon a managed EKS cluster is provisioned by Cluster API and is ready.
+While a CR of an IAM policy is a static definition, which can be defined in advance, a CR of an IAM role might contain
+dynamic parts such as OIDC ARN/name of a created EKS cluster. It means, that while a role can reference existing
+policies,
+the dynamic parts should be provisioned on the fly, upon a managed EKS cluster is provisioned by Cluster API and is
+ready.
 
-The `AWSIAMProvision` CR can be used for defining a Golang template for such on-the-fly IAM role provisioning:
+For that purposes, the `AWSIAMProvision` CR can be used for defining a Golang template for such on-the-fly IAM role
+provisioning:
 
 ```yaml
 apiVersion: iam.aws.edenlab.io/v1alpha1
@@ -89,13 +93,17 @@ spec:
 
 The `assumeRolePolicyDocument` field of the `AWSIAMProvision` CR supports the following Golang template's placeholders:
 
-- `{{ .OIDCProviderARN }}`: rendered to something like `arn:aws:iam::012345678901:oidc-provider/oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8`
-- `{{ .OIDCProviderName }}`: rendered to something like `oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8`
+- `{{ .OIDCProviderARN }}`: rendered to something
+  like `arn:aws:iam::012345678901:oidc-provider/oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8`
+- `{{ .OIDCProviderName }}`: rendered to something
+  like `oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8`
 
-The rest of the `roles.*.spec` fields are identical to the original AWS IAM [Role](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/).
+The rest of the `roles.*.spec` fields are identical to the original AWS
+IAM [Role](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/).
 
-The [AWSManagedControlPlane](https://cluster-api-aws.sigs.k8s.io/crd/#controlplane.cluster.x-k8s.io/v1beta2.AWSManagedControlPlane) 
-Cluster API CR is watched the AWS IAM provisioner operator. As the result, a role CR will be created on the fly by the operator 
+The [AWSManagedControlPlane](https://cluster-api-aws.sigs.k8s.io/crd/#controlplane.cluster.x-k8s.io/v1beta2.AWSManagedControlPlane)
+Cluster API CR is watched the AWS IAM provisioner operator. As the result, a role CR will be created on the fly by the
+operator
 upon a EKS cluster provisioning.
 
 > `policyRefs` should reference existing AWS IAM `Policy` CRs created by AWS IAM Controller.
@@ -120,7 +128,8 @@ spec:
   # truncated
 ```
 
-Example of a result AWS IAM [Role](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/) created by the operator:
+Example of a result AWS IAM [Role](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/) created
+by the operator:
 
 ```yaml
 apiVersion: iam.services.k8s.aws/v1alpha1
@@ -129,12 +138,12 @@ metadata:
   name: deps-ffs-1-ebs-csi-controller
   namespace: capa-system
   ownerReferences:
-  - apiVersion: iam.aws.edenlab.io/v1alpha1
-    blockOwnerDeletion: true
-    controller: true
-    kind: AWSIAMProvision
-    name: deps-ffs-1
-    uid: 77b58794-73cc-4a36-bbd9-572165ff6664
+    - apiVersion: iam.aws.edenlab.io/v1alpha1
+      blockOwnerDeletion: true
+      controller: true
+      kind: AWSIAMProvision
+      name: deps-ffs-1
+      uid: 77b58794-73cc-4a36-bbd9-572165ff6664
   # truncated
 spec:
   assumeRolePolicyDocument: |
@@ -160,9 +169,9 @@ spec:
   name: deps-ffs-1-ebs-csi-controller
   path: /
   policyRefs:
-  - from:
-      name: deps-ffs-1-ebs-csi-controller-core
-      namespace: capa-system
+    - from:
+        name: deps-ffs-1-ebs-csi-controller-core
+        namespace: capa-system
   # truncated
 ```
 
@@ -202,7 +211,7 @@ make deploy IMG=<some-registry>/aws-iam-provisioner:tag
 ```
 
 > **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+> privileges or be logged in as admin.
 
 **Create instances of your solution**
 You can apply the samples (examples) from the config/sample:
@@ -211,7 +220,7 @@ You can apply the samples (examples) from the config/sample:
 kubectl apply -k config/samples/
 ```
 
->**NOTE**: Ensure that the samples has default values to test it out.
+> **NOTE**: Ensure that the samples has default values to test it out.
 
 ### To Uninstall
 
