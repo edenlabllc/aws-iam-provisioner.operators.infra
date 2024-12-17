@@ -94,11 +94,14 @@ spec:
 The `assumeRolePolicyDocument` field of the `AWSIAMProvision` CR supports the following Golang template's placeholders:
 
 - `{{ .OIDCProviderARN }}`: rendered to something
-  like `arn:aws:iam::012345678901:oidc-provider/oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8`
+  like `arn:aws:iam::012345678901:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/AAAAABBBBB0000011111222223333344`
 - `{{ .OIDCProviderName }}`: rendered to something
-  like `oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8`
+  like `oidc.eks.us-east-1.amazonaws.com/id/AAAAABBBBB0000011111222223333344`
 
-The rest of the `roles.*.spec` fields are identical to the original AWS
+> In this example, the `kube-system:ebs-csi-controller` part means, that the `ebs-csi-controller` K8S service account is
+> in the `kube-system` namespace.
+
+The rest of the `spec.roles.*.spec` fields are identical to the original AWS
 IAM [Role](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/).
 
 The [AWSManagedControlPlane](https://cluster-api-aws.sigs.k8s.io/crd/#controlplane.cluster.x-k8s.io/v1beta2.AWSManagedControlPlane)
@@ -119,10 +122,10 @@ metadata:
   # truncated
 spec:
   controlPlaneEndpoint:
-    host: https://A71AAF56A08649E2055C1343D2FE70C8.gr7.eu-north-1.eks.amazonaws.com
+    host: https://AAAAABBBBB0000011111222223333344.gr7.us-east-1.eks.amazonaws.com
     port: 443
   eksClusterName: deps-ffs-1
-  region: eu-north-1
+  region: us-east-1
   roleName: deps-ffs-1-iam-service-role
   version: v1.29.8
   # truncated
@@ -154,12 +157,12 @@ spec:
           "Sid": "",
           "Effect": "Allow",
           "Principal": {
-            "Federated": "arn:aws:iam::012345678901:oidc-provider/oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8"
+            "Federated": "arn:aws:iam::012345678901:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/AAAAABBBBB0000011111222223333344"
           },
           "Action": "sts:AssumeRoleWithWebIdentity",
           "Condition": {
             "StringEquals": {
-              "oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
+              "oidc.eks.us-east-1.amazonaws.com/id/AAAAABBBBB0000011111222223333344:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
             }
           }
         }
