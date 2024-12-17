@@ -1,8 +1,318 @@
 # aws-iam-provisioner
-// TODO(user): Add simple overview of use/purpose
+
+The AWS IAM provisioner operator provisions IAM roles on the fly for the Kubernetes clusters 
+provisioned using [Cluster API](https://cluster-api-aws.sigs.k8s.io/getting-started).
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+
+After a managed [AWS EKS](https://aws.amazon.com/eks/) cluster is provisioned using 
+[Kubernetes Cluster API Provider AWS](https://cluster-api-aws.sigs.k8s.io/getting-started), it might be required 
+to provision IAM roles and policies for installed services, 
+e.g. [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/), 
+[AWS Elastic Block Store CSI driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/tree/master).
+
+For Kubernetes-based resource provisioning, [AWS Controllers for Kubernetes](https://aws-controllers-k8s.github.io/community/)
+can be used to provision IAM [policies](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/policy/) 
+and [roles](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/). 
+Custom resources (CRs) for the controller might look like the following:
+
+```yaml
+apiVersion: iam.services.k8s.aws/v1alpha1
+kind: Policy
+metadata:
+  name: deps-ffs-1-ebs-csi-controller-core
+  namespace: capa-system
+  # truncated
+spec:
+  name: deps-ffs-1-ebs-csi-controller-core
+  policyDocument: |
+    {
+        "Statement": [
+            {
+                "Action": [
+                    "ec2:CreateSnapshot",
+                    "ec2:AttachVolume",
+                    "ec2:DetachVolume",
+                    "ec2:ModifyVolume",
+                    "ec2:DescribeAvailabilityZones",
+                    "ec2:DescribeInstances",
+                    "ec2:DescribeSnapshots",
+                    "ec2:DescribeTags",
+                    "ec2:DescribeVolumes",
+                    "ec2:DescribeVolumesModifications"
+                ],
+                "Effect": "Allow",
+                "Resource": "*"
+            }
+        ],
+        "Version": "2012-10-17"
+    }
+  # truncated
+```
+
+```yaml
+apiVersion: iam.services.k8s.aws/v1alpha1
+kind: Role
+metadata:
+  name: deps-ffs-1-ebs-csi-controller
+  namespace: capa-system
+  # truncated
+spec:
+  assumeRolePolicyDocument: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "",
+          "Effect": "Allow",
+          "Principal": {
+            "Federated": "arn:aws:iam::288509344804:oidc-provider/oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8"
+          },
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+            "StringEquals": {
+              "oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
+            }
+          }
+        }
+      ]
+    }
+  maxSessionDuration: 3600
+  name: deps-ffs-1-ebs-csi-controller
+  path: /
+  policyRefs:
+    - from:
+        name: deps-ffs-1-ebs-csi-controller-core
+        namespace: capa-system
+  # truncated
+```
+
+While a CR of an IAM policy is a static definition, which can be defined in advance, a CR of IAM role might contain 
+dynamic parts such as OIDC ARN/name of a created cluster. It means that while a role can reference existing policies,
+the dynamic parts should be provisioned on the fly upon a managed EKS cluster is provisioned by Cluster API and ready.
+Therefor, the `assumeRolePolicyDocument` field might contain the following Golang template's placeholders:
+- `{{ .OIDCProviderARN }}`: will be rendered to something like `arn:aws:iam::288509344804:oidc-provider/oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8`
+- `{{ .OIDCProviderName }}`: will be rendered to something like `oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8`
+
+Example of the templated `assumeRolePolicyDocument`:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "",
+        "Effect": "Allow",
+        "Principal": {
+          "Federated": "{{ .OIDCProviderARN }}"
+        },
+        "Action": "sts:AssumeRoleWithWebIdentity",
+        "Condition": {
+          "StringEquals": {
+              "{{ .OIDCProviderName }}:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
+          }
+        }
+      }
+    ]
+  }
+```
+
+Example of the `AWSIAMProvision` CR:
+
+```yaml
+apiVersion: iam.aws.edenlab.io/v1alpha1
+kind: AWSIAMProvision
+metadata:
+  name: deps-ffs-1
+  namespace: capa-system
+  # truncated
+spec:
+  eksClusterName: deps-ffs-1
+  roles:
+    deps-ffs-1-ebs-csi-controller:
+      spec:
+        assumeRolePolicyDocument: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "",
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "{{ .OIDCProviderARN }}"
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                    "{{ .OIDCProviderName }}:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
+                  }
+                }
+              }
+            ]
+          }
+        maxSessionDuration: 3600
+        name: deps-ffs-1-ebs-csi-controller
+        path: /
+        policyRefs:
+          - from:
+              name: deps-ffs-1-ebs-csi-controller-core
+              namespace: capa-system
+  # truncated
+```
+
+As the result, an AWS IAM [Role](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/) CR is created on the fly.
+
+> `policyRefs` should reference existing AWS IAM `Policy` resources created by AWS IAM Controller.
+
+Example of an [AWSManagedControlPlane](https://cluster-api-aws.sigs.k8s.io/crd/#controlplane.cluster.x-k8s.io/v1beta2.AWSManagedControlPlane):
+
+```yaml
+apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+kind: AWSManagedControlPlane
+metadata:
+  name: deps-ffs-1
+  namespace: capa-system
+  # truncated
+spec:
+  addons: []
+  associateOIDCProvider: true
+  bastion:
+    allowedCIDRBlocks:
+    - 0.0.0.0/0
+    enabled: false
+  controlPlaneEndpoint:
+    host: https://A71AAF56A08649E2055C1343D2FE70C8.gr7.eu-north-1.eks.amazonaws.com
+    port: 443
+  eksClusterName: deps-ffs-1
+  endpointAccess:
+    private: false
+    public: true
+    publicCIDRs:
+    - 0.0.0.0/0
+  iamAuthenticatorConfig: {}
+  identityRef:
+    kind: AWSClusterStaticIdentity
+    name: aws-cluster-identity
+  kubeProxy:
+    disable: false
+  logging:
+    apiServer: false
+    audit: false
+    authenticator: false
+    controllerManager: false
+    scheduler: false
+  network:
+    cni: {}
+    subnets:
+      # truncated
+    vpc:
+      availabilityZoneSelection: Ordered
+      availabilityZoneUsageLimit: 3
+      cidrBlock: 10.0.0.0/16
+      emptyRoutesDefaultVPCSecurityGroup: true
+      id: vpc-06a4940fc7a2ee655
+      internetGatewayId: igw-0720f332efe5f4af5
+      privateDnsHostnameTypeOnLaunch: ip-name
+      subnetSchema: PreferPrivate
+      tags:
+        Name: deps-ffs-1-vpc
+        sigs.k8s.io/cluster-api-provider-aws/cluster/deps-ffs-1: owned
+        sigs.k8s.io/cluster-api-provider-aws/role: common
+  partition: aws
+  region: eu-north-1
+  restrictPrivateSubnets: true
+  roleName: deps-ffs-1-iam-service-role
+  sshKeyName: deps-ffs-1
+  tokenMethod: iam-authenticator
+  version: v1.29.8
+  vpcCni:
+    disable: false
+  # truncated
+```
+
+Example of a created AWS IAM [Role](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/):
+
+```yaml
+apiVersion: iam.services.k8s.aws/v1alpha1
+kind: Role
+metadata:
+  name: deps-ffs-1-ebs-csi-controller
+  namespace: capa-system
+  ownerReferences:
+  - apiVersion: iam.aws.edenlab.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: AWSIAMProvision
+    name: deps-ffs-1
+    uid: 77b58794-73cc-4a36-bbd9-572165ff6664
+  # truncated
+spec:
+  assumeRolePolicyDocument: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "",
+          "Effect": "Allow",
+          "Principal": {
+            "Federated": "arn:aws:iam::288509344804:oidc-provider/oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8"
+          },
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+            "StringEquals": {
+              "oidc.eks.eu-north-1.amazonaws.com/id/A71AAF56A08649E2055C1343D2FE70C8:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
+            }
+          }
+        }
+      ]
+    }
+  maxSessionDuration: 3600
+  name: deps-ffs-1-ebs-csi-controller
+  path: /
+  policyRefs:
+  - from:
+      name: deps-ffs-1-ebs-csi-controller-core
+      namespace: capa-system
+  # truncated
+```
+
+> `ownerReferences` is set to define a parent-child relationship between AWSIAMProvision and the created Role.
+
+This operator contains one CRD which directs the operator to manage IAM roles upon an EKS cluster creation:
+
+```yaml
+spec:
+  eksClusterName: deps-ffs-1
+  roles:
+    deps-ffs-1-ebs-csi-controller:
+      spec:
+        assumeRolePolicyDocument: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "",
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "{{ .OIDCProviderARN }}"
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                    "{{ .OIDCProviderName }}:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
+                  }
+                }
+              }
+            ]
+          }
+        maxSessionDuration: 3600
+        name: deps-ffs-1-ebs-csi-controller
+        path: /
+        policyRefs:
+          - from:
+              name: deps-ffs-1-ebs-csi-controller-core
+              namespace: capa-system
+```
 
 ## Getting Started
 
@@ -11,6 +321,8 @@
 - docker version 17.03+.
 - kubectl version v1.11.3+.
 - Access to a Kubernetes v1.11.3+ cluster.
+
+[//]: # (todo cluster api requirements?)
 
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**
