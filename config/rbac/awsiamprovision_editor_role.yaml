@@ -1,0 +1,27 @@
+# permissions for end users to edit awsiamprovisions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: aws-iam-provisioner
+    app.kubernetes.io/managed-by: kustomize
+  name: awsiamprovision-editor-role
+rules:
+- apiGroups:
+  - iam.aws.edenlab.io
+  resources:
+  - awsiamprovisions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - iam.aws.edenlab.io
+  resources:
+  - awsiamprovisions/status
+  verbs:
+  - get
