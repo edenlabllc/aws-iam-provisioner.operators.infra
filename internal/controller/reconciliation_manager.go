@@ -151,7 +151,11 @@ func (rm *ReconciliationManager) handleRole(awsIAMProvision *iamv1alpha1.AWSIAMP
 
 	if cmp.Equal(item.Spec, k8sResource.Spec) {
 		// No diff with existing resource, exiting without error
+		rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision equal: %s", rm.request.NamespacedName, namespacedName))
+
 		return nil, nil
+	} else {
+		rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision different: %s", rm.request.NamespacedName, namespacedName))
 	}
 
 	if err := rm.validateRolePolicyRefs(awsIAMProvision, item); err != nil {
@@ -219,7 +223,7 @@ func (rm *ReconciliationManager) getPolicy(awsIAMProvision *iamv1alpha1.AWSIAMPr
 }
 
 func (rm *ReconciliationManager) setDefaultValues(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, item *iamv1alpha1.AWSIAMProvisionRole) error {
-	// set default values to prevent unwanted diffs (the logic is similar to aws-iam-controller)
+	// Set default values to prevent unwanted diffs (the logic is similar to aws-iam-controller)
 	if item.Spec.MaxSessionDuration == nil {
 		defaultMaxSessionDuration := int64(3600)
 		item.Spec.MaxSessionDuration = &defaultMaxSessionDuration
@@ -230,7 +234,7 @@ func (rm *ReconciliationManager) setDefaultValues(awsIAMProvision *iamv1alpha1.A
 		item.Spec.Path = &defaultPath
 	}
 
-	// set rendered template to detect the diff correctly
+	// Set rendered template to detect the diff correctly
 	if err := rm.setAssumeRolePolicyDocument(awsIAMProvision, eksControlPlane, item); err != nil {
 		return err
 	}
