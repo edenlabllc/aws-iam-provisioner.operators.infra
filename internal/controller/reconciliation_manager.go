@@ -105,7 +105,7 @@ func (rm *ReconciliationManager) handleRole(awsIAMProvision *iamv1alpha1.AWSIAMP
 	if err := rm.client.Get(*rm.context, namespacedName, k8sResource); err != nil {
 		if k8serrors.IsNotFound(err) {
 			// Create new role
-			if err := rm.setAssumeRolePolicyDocument(awsIAMProvision, eksControlPlane, item); err != nil {
+			if err := rm.setDefaultValues(awsIAMProvision, eksControlPlane, item); err != nil {
 				return nil, err
 			}
 
@@ -145,13 +145,17 @@ func (rm *ReconciliationManager) handleRole(awsIAMProvision *iamv1alpha1.AWSIAMP
 		return nil, err
 	}
 
-	if err := rm.setAssumeRolePolicyDocument(awsIAMProvision, eksControlPlane, item); err != nil {
+	if err := rm.setDefaultValues(awsIAMProvision, eksControlPlane, item); err != nil {
 		return nil, err
 	}
 
 	if cmp.Equal(item.Spec, k8sResource.Spec) {
 		// No diff with existing resource, exiting without error
+		rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision equal: %s", rm.request.NamespacedName, namespacedName))
+
 		return nil, nil
+	} else {
+		rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision different: %s", rm.request.NamespacedName, namespacedName))
 	}
 
 	if err := rm.validateRolePolicyRefs(awsIAMProvision, item); err != nil {
@@ -216,6 +220,26 @@ func (rm *ReconciliationManager) getPolicy(awsIAMProvision *iamv1alpha1.AWSIAMPr
 	}
 
 	return k8sResource, nil
+}
+
+func (rm *ReconciliationManager) setDefaultValues(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, item *iamv1alpha1.AWSIAMProvisionRole) error {
+	// Set default values to prevent unwanted diffs (the logic is similar to aws-iam-controller)
+	if item.Spec.MaxSessionDuration == nil {
+		defaultMaxSessionDuration := int64(3600)
+		item.Spec.MaxSessionDuration = &defaultMaxSessionDuration
+	}
+
+	if item.Spec.Path == nil {
+		defaultPath := "/"
+		item.Spec.Path = &defaultPath
+	}
+
+	// Set rendered template to detect the diff correctly
+	if err := rm.setAssumeRolePolicyDocument(awsIAMProvision, eksControlPlane, item); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (rm *ReconciliationManager) setAssumeRolePolicyDocument(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, item *iamv1alpha1.AWSIAMProvisionRole) error {
