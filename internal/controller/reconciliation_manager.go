@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"k8s.io/apimachinery/pkg/runtime"
 	"strings"
 	"text/template"
 	"time"
@@ -14,8 +13,10 @@ import (
 	ackv1alpha1 "github.com/aws-controllers-k8s/runtime/apis/core/v1alpha1"
 	"github.com/go-logr/logr"
 	"github.com/google/go-cmp/cmp"
+	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ekscontrolplanev1 "sigs.k8s.io/cluster-api-provider-aws/v2/controlplane/eks/api/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -68,14 +69,14 @@ func (rm *ReconciliationManager) getClusterResources() (*iamv1alpha1.AWSIAMProvi
 			msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not found: %s", rm.request.NamespacedName, namespacedName)
 			rm.logger.Info(msg)
 
-			if err := rm.updateCRDStatus(awsIAMProvision, "Provisioning", msg); err != nil {
+			if err := rm.updateCRDStatus(awsIAMProvision, "Provisioning", msg, nil); err != nil {
 				return nil, nil, err
 			}
 
 			return nil, nil, nil
 		}
 
-		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error()); err != nil {
+		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
 			return nil, nil, err
 		}
 
@@ -88,7 +89,7 @@ func (rm *ReconciliationManager) getClusterResources() (*iamv1alpha1.AWSIAMProvi
 		msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not ready: %s", rm.request.NamespacedName, namespacedName)
 		rm.logger.Info(msg)
 
-		if err := rm.updateCRDStatus(awsIAMProvision, "Provisioning", msg); err != nil {
+		if err := rm.updateCRDStatus(awsIAMProvision, "Provisioning", msg, nil); err != nil {
 			return nil, nil, err
 		}
 
@@ -122,7 +123,7 @@ func (rm *ReconciliationManager) handleRole(awsIAMProvision *iamv1alpha1.AWSIAMP
 
 			// Set ownerReferences to ensure that the created resource will be deleted when the custom resource object is removed
 			if err := ctrl.SetControllerReference(awsIAMProvision, k8sResource, rm.scheme); err != nil {
-				if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error()); err != nil {
+				if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
 					return nil, err
 				}
 
@@ -130,7 +131,7 @@ func (rm *ReconciliationManager) handleRole(awsIAMProvision *iamv1alpha1.AWSIAMP
 			}
 
 			if err = rm.client.Create(*rm.context, k8sResource); err != nil {
-				if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error()); err != nil {
+				if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
 					return nil, err
 				}
 
@@ -174,10 +175,38 @@ func (rm *ReconciliationManager) handleRole(awsIAMProvision *iamv1alpha1.AWSIAMP
 	return k8sResource, nil
 }
 
-func (rm *ReconciliationManager) updateCRDStatus(awsIAMProvision *iamv1alpha1.AWSIAMProvision, phase, message string) error {
+func (rm *ReconciliationManager) updateCRDStatus(awsIAMProvision *iamv1alpha1.AWSIAMProvision, phase, message string, roles []*iamctrlv1alpha1.Role) error {
 	awsIAMProvision.Status.LastUpdatedTime = &metav1.Time{Time: time.Now()}
 	awsIAMProvision.Status.Phase = phase
 	awsIAMProvision.Status.Message = message
+
+	if roles != nil {
+		var statusRoles []iamv1alpha1.AWSIAMProvisionStatusRole
+
+		for _, role := range roles {
+			statusRolePhase := "Provisioned"
+			statusRoleMessage := ""
+
+			fmt.Printf("%#v\n", role)
+
+			for _, condition := range role.Status.Conditions {
+				if condition.Status != v1.ConditionTrue {
+					statusRolePhase = "Failed"
+					statusRoleMessage = *condition.Message
+
+					break
+				}
+			}
+
+			statusRoles = append(statusRoles, iamv1alpha1.AWSIAMProvisionStatusRole{
+				Phase:   statusRolePhase,
+				Message: statusRoleMessage,
+				Status:  role.Status,
+			})
+		}
+
+		awsIAMProvision.Status.Roles = statusRoles
+	}
 
 	if err := rm.status.Update(*rm.context, awsIAMProvision); err != nil {
 		return errors.New(fmt.Sprintf("Unable to update status for CRD: %s", awsIAMProvision.Name))
@@ -192,7 +221,7 @@ func (rm *ReconciliationManager) validateRolePolicyRefs(awsIAMProvision *iamv1al
 		_, err := rm.getPolicy(awsIAMProvision, item, policyRef)
 
 		if err != nil {
-			if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error()); err != nil {
+			if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
 				return err
 			}
 
@@ -212,7 +241,7 @@ func (rm *ReconciliationManager) getPolicy(awsIAMProvision *iamv1alpha1.AWSIAMPr
 			err = errors.New(fmt.Sprintf("IAM Policy of %s IAM Role of %s AWSIAMProvision not found: %s", *item.Spec.Name, rm.request.NamespacedName, namespacedName))
 		}
 
-		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error()); err != nil {
+		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
 			return nil, err
 		}
 
@@ -250,7 +279,7 @@ func (rm *ReconciliationManager) setAssumeRolePolicyDocument(awsIAMProvision *ia
 		namespacedName := types.NamespacedName{Name: awsIAMProvision.Spec.EksClusterName, Namespace: rm.request.NamespacedName.Namespace}
 		err := errors.New(fmt.Sprintf("OIDC ARN of %s AWSManagedControlPlane of %s AWSIAMProvision malformed: %s", namespacedName, rm.request.NamespacedName, oidcProviderARN))
 
-		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error()); err != nil {
+		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
 			return err
 		}
 
@@ -258,7 +287,7 @@ func (rm *ReconciliationManager) setAssumeRolePolicyDocument(awsIAMProvision *ia
 	}
 
 	if assumeRolePolicyDocument, err := rm.renderOIDCProviderTemplate(*item.Spec.AssumeRolePolicyDocument, oidcProviderARN, oidcProviderName); err != nil {
-		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error()); err != nil {
+		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
 			return err
 		}
 

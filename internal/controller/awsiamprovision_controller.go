@@ -19,12 +19,13 @@ package controller
 import (
 	"context"
 	"fmt"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"time"
 
+	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
@@ -65,7 +66,7 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{RequeueAfter: frequency}, nil
 	}
 
-	provisioned := false
+	var updatedK8sResources []*iamctrlv1alpha1.Role
 	for name, item := range awsIAMProvision.Spec.Roles {
 		k8sResource, err := r.handleRole(awsIAMProvision, eksControlPlane, name, &item)
 
@@ -75,15 +76,15 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 		if k8sResource != nil {
 			// If a resource has been returned, there was a change to it
-			provisioned = true
+			updatedK8sResources = append(updatedK8sResources, k8sResource)
 		}
 	}
 
-	if awsIAMProvision.Status.Phase != "Provisioned" || provisioned {
+	if awsIAMProvision.Status.Phase != "Provisioned" || len(updatedK8sResources) > 0 {
 		// Resources have been provisioned successfully
 		r.logger.Info(fmt.Sprintf("AWSIAMProvision provisioned: %s", r.request.NamespacedName))
 
-		if err := r.updateCRDStatus(awsIAMProvision, "Provisioned", ""); err != nil {
+		if err := r.updateCRDStatus(awsIAMProvision, "Provisioned", "", updatedK8sResources); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -96,5 +97,6 @@ func (r *AWSIAMProvisionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&iamv1alpha1.AWSIAMProvision{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
+		Owns(&iamctrlv1alpha1.Role{}). // trigger the r.Reconcile whenever an Own-ed resource is created/updated/deleted
 		Complete(r)
 }

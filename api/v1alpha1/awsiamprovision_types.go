@@ -35,13 +35,23 @@ type AWSIAMProvisionSpec struct {
 	Roles          map[string]AWSIAMProvisionRole `json:"roles"`
 }
 
+// AWSIAMProvisionStatusRole defines the observed state of AWSIAMProvision.
+type AWSIAMProvisionStatusRole struct {
+	// Important: Run "make" to regenerate code after modifying this file
+
+	Message string                     `json:"message,omitempty"`
+	Phase   string                     `json:"phase,omitempty"`
+	Status  iamctrlv1alpha1.RoleStatus `json:"status,omitempty"`
+}
+
 // AWSIAMProvisionStatus defines the observed state of AWSIAMProvision.
 type AWSIAMProvisionStatus struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
-	Message         string       `json:"message,omitempty"`
-	LastUpdatedTime *metav1.Time `json:"lastUpdatedTime,omitempty"`
-	Phase           string       `json:"phase,omitempty"`
+	Message         string                      `json:"message,omitempty"`
+	LastUpdatedTime *metav1.Time                `json:"lastUpdatedTime,omitempty"`
+	Phase           string                      `json:"phase,omitempty"`
+	Roles           []AWSIAMProvisionStatusRole `json:"roles,omitempty"`
 }
 
 // +kubebuilder:object:root=true
