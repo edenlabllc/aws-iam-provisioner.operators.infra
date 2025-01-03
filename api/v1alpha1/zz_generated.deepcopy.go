@@ -130,9 +130,9 @@ func (in *AWSIAMProvisionStatus) DeepCopyInto(out *AWSIAMProvisionStatus) {
 	}
 	if in.Roles != nil {
 		in, out := &in.Roles, &out.Roles
-		*out = make([]AWSIAMProvisionStatusRole, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
+		*out = make(map[string]AWSIAMProvisionStatusRole, len(*in))
+		for key, val := range *in {
+			(*out)[key] = *val.DeepCopy()
 		}
 	}
 }

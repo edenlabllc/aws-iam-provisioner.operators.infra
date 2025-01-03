@@ -235,7 +235,7 @@ spec:
               phase:
                 type: string
               roles:
-                items:
+                additionalProperties:
                   description: AWSIAMProvisionStatusRole defines the observed state
                     of AWSIAMProvision.
                   properties:
@@ -341,7 +341,7 @@ spec:
                           type: object
                       type: object
                   type: object
-                type: array
+                type: object
             type: object
         type: object
     served: true

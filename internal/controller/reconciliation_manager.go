@@ -99,97 +99,95 @@ func (rm *ReconciliationManager) getClusterResources() (*iamv1alpha1.AWSIAMProvi
 	return awsIAMProvision, eksControlPlane, nil
 }
 
-func (rm *ReconciliationManager) handleRole(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, name string, item *iamv1alpha1.AWSIAMProvisionRole) (*iamctrlv1alpha1.Role, error) {
+func (rm *ReconciliationManager) handleRole(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, name string, item *iamv1alpha1.AWSIAMProvisionRole) (*iamctrlv1alpha1.Role, bool, error) {
 	k8sResource := &iamctrlv1alpha1.Role{}
 	namespacedName := types.NamespacedName{Name: name, Namespace: rm.request.NamespacedName.Namespace}
 
 	if err := rm.client.Get(*rm.context, namespacedName, k8sResource); err != nil {
-		if k8serrors.IsNotFound(err) {
-			// Create new role
-			if err := rm.setDefaultValues(awsIAMProvision, eksControlPlane, item); err != nil {
-				return nil, err
-			}
-
-			if err := rm.validateRolePolicyRefs(awsIAMProvision, item); err != nil {
-				return nil, err
-			}
-
-			k8sResource.TypeMeta = roleMeta
-			k8sResource.ObjectMeta = metav1.ObjectMeta{
-				Name:      name,
-				Namespace: rm.request.NamespacedName.Namespace,
-			}
-			k8sResource.Spec = item.Spec
-
-			// Set ownerReferences to ensure that the created resource will be deleted when the custom resource object is removed
-			if err := ctrl.SetControllerReference(awsIAMProvision, k8sResource, rm.scheme); err != nil {
-				if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
-					return nil, err
-				}
-
-				return nil, err
-			}
-
-			if err = rm.client.Create(*rm.context, k8sResource); err != nil {
-				if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
-					return nil, err
-				}
-
-				return nil, err
-			}
-
-			rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision created: %s", rm.request.NamespacedName, namespacedName))
-
-			return k8sResource, nil
+		if !k8serrors.IsNotFound(err) {
+			return nil, false, err
 		}
 
-		return nil, err
+		// Create new role
+		if err := rm.setDefaultValues(awsIAMProvision, eksControlPlane, item); err != nil {
+			return nil, false, err
+		}
+
+		if err := rm.validateRolePolicyRefs(awsIAMProvision, item); err != nil {
+			return nil, false, err
+		}
+
+		k8sResource.TypeMeta = roleMeta
+		k8sResource.ObjectMeta = metav1.ObjectMeta{
+			Name:      name,
+			Namespace: rm.request.NamespacedName.Namespace,
+		}
+		k8sResource.Spec = item.Spec
+
+		// Set ownerReferences to ensure that the created resource will be deleted when the custom resource object is removed
+		if err := ctrl.SetControllerReference(awsIAMProvision, k8sResource, rm.scheme); err != nil {
+			if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
+				return nil, false, err
+			}
+
+			return nil, false, err
+		}
+
+		if err = rm.client.Create(*rm.context, k8sResource); err != nil {
+			if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
+				return nil, false, err
+			}
+
+			return nil, false, err
+		}
+
+		rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision created: %s", rm.request.NamespacedName, namespacedName))
+
+		return k8sResource, true, nil
 	}
 
 	if err := rm.setDefaultValues(awsIAMProvision, eksControlPlane, item); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	if cmp.Equal(item.Spec, k8sResource.Spec) {
 		// No diff with existing resource, exiting without error
 		rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision equal: %s", rm.request.NamespacedName, namespacedName))
 
-		return nil, nil
-	} else {
-		rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision different: %s", rm.request.NamespacedName, namespacedName))
+		return k8sResource, false, nil
 	}
 
+	rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision different: %s", rm.request.NamespacedName, namespacedName))
+
 	if err := rm.validateRolePolicyRefs(awsIAMProvision, item); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// Update role with new values
 	k8sResource.Spec = item.Spec
 
 	if err := rm.client.Update(*rm.context, k8sResource); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision updated: %s", rm.request.NamespacedName, namespacedName))
 
-	return k8sResource, nil
+	return k8sResource, true, nil
 }
 
-func (rm *ReconciliationManager) updateCRDStatus(awsIAMProvision *iamv1alpha1.AWSIAMProvision, phase, message string, roles []*iamctrlv1alpha1.Role) error {
+func (rm *ReconciliationManager) updateCRDStatus(awsIAMProvision *iamv1alpha1.AWSIAMProvision, phase, message string, roleStatuses map[string]*iamctrlv1alpha1.RoleStatus) error {
 	awsIAMProvision.Status.LastUpdatedTime = &metav1.Time{Time: time.Now()}
 	awsIAMProvision.Status.Phase = phase
 	awsIAMProvision.Status.Message = message
 
-	if roles != nil {
-		var statusRoles []iamv1alpha1.AWSIAMProvisionStatusRole
+	if roleStatuses != nil {
+		statusRoles := make(map[string]iamv1alpha1.AWSIAMProvisionStatusRole)
 
-		for _, role := range roles {
+		for roleName, roleStatus := range roleStatuses {
 			statusRolePhase := "Provisioned"
 			statusRoleMessage := ""
 
-			fmt.Printf("%#v\n", role)
-
-			for _, condition := range role.Status.Conditions {
+			for _, condition := range roleStatus.Conditions {
 				if condition.Status != v1.ConditionTrue {
 					statusRolePhase = "Failed"
 					statusRoleMessage = *condition.Message
@@ -198,18 +196,18 @@ func (rm *ReconciliationManager) updateCRDStatus(awsIAMProvision *iamv1alpha1.AW
 				}
 			}
 
-			statusRoles = append(statusRoles, iamv1alpha1.AWSIAMProvisionStatusRole{
+			statusRoles[roleName] = iamv1alpha1.AWSIAMProvisionStatusRole{
 				Phase:   statusRolePhase,
 				Message: statusRoleMessage,
-				Status:  role.Status,
-			})
+				Status:  *roleStatus,
+			}
 		}
 
 		awsIAMProvision.Status.Roles = statusRoles
 	}
 
 	if err := rm.status.Update(*rm.context, awsIAMProvision); err != nil {
-		return errors.New(fmt.Sprintf("Unable to update status for CRD: %s", awsIAMProvision.Name))
+		return errors.New(fmt.Sprintf("Unable to update status for CRD: %s, error: %s", awsIAMProvision.Name, err))
 	}
 
 	return nil

@@ -48,10 +48,10 @@ type AWSIAMProvisionStatusRole struct {
 type AWSIAMProvisionStatus struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
-	Message         string                      `json:"message,omitempty"`
-	LastUpdatedTime *metav1.Time                `json:"lastUpdatedTime,omitempty"`
-	Phase           string                      `json:"phase,omitempty"`
-	Roles           []AWSIAMProvisionStatusRole `json:"roles,omitempty"`
+	Message         string                               `json:"message,omitempty"`
+	LastUpdatedTime *metav1.Time                         `json:"lastUpdatedTime,omitempty"`
+	Phase           string                               `json:"phase,omitempty"`
+	Roles           map[string]AWSIAMProvisionStatusRole `json:"roles,omitempty"`
 }
 
 // +kubebuilder:object:root=true

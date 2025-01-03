@@ -22,6 +22,7 @@ import (
 	"time"
 
 	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
+	"github.com/google/go-cmp/cmp"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -66,25 +67,36 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{RequeueAfter: frequency}, nil
 	}
 
-	var updatedK8sResources []*iamctrlv1alpha1.Role
+	awsIAMProvisionProvisioned := false
+	sourceK8sResourceStatuses := make(map[string]*iamctrlv1alpha1.RoleStatus)
 	for name, item := range awsIAMProvision.Spec.Roles {
-		k8sResource, err := r.handleRole(awsIAMProvision, eksControlPlane, name, &item)
+		k8sResource, k8sResourceUpdated, err := r.handleRole(awsIAMProvision, eksControlPlane, name, &item)
 
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 
 		if k8sResource != nil {
-			// If a resource has been returned, there was a change to it
-			updatedK8sResources = append(updatedK8sResources, k8sResource)
+			sourceK8sResourceStatuses[k8sResource.Name] = &k8sResource.Status
+		}
+
+		if k8sResourceUpdated {
+			awsIAMProvisionProvisioned = true
 		}
 	}
 
-	if awsIAMProvision.Status.Phase != "Provisioned" || len(updatedK8sResources) > 0 {
+	targetK8sResourceStatuses := make(map[string]*iamctrlv1alpha1.RoleStatus)
+	for name, awsIAMProvisionStatusRole := range awsIAMProvision.Status.Roles {
+		targetK8sResourceStatuses[name] = &awsIAMProvisionStatusRole.Status
+	}
+
+	k8sResourceStatusesDifferent := !cmp.Equal(sourceK8sResourceStatuses, targetK8sResourceStatuses)
+
+	if awsIAMProvision.Status.Phase != "Provisioned" || awsIAMProvisionProvisioned || k8sResourceStatusesDifferent {
 		// Resources have been provisioned successfully
 		r.logger.Info(fmt.Sprintf("AWSIAMProvision provisioned: %s", r.request.NamespacedName))
 
-		if err := r.updateCRDStatus(awsIAMProvision, "Provisioned", "", updatedK8sResources); err != nil {
+		if err := r.updateCRDStatus(awsIAMProvision, "Provisioned", "", sourceK8sResourceStatuses); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
