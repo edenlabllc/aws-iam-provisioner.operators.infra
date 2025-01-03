@@ -35,7 +35,7 @@ type AWSIAMProvisionSpec struct {
 	Roles          map[string]AWSIAMProvisionRole `json:"roles"`
 }
 
-// AWSIAMProvisionStatusRole defines the observed state of AWSIAMProvision.
+// AWSIAMProvisionStatusRole defines the observed state of AWSIAMProvision's roles.
 type AWSIAMProvisionStatusRole struct {
 	// Important: Run "make" to regenerate code after modifying this file
 

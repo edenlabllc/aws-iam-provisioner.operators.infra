@@ -237,7 +237,7 @@ spec:
               roles:
                 additionalProperties:
                   description: AWSIAMProvisionStatusRole defines the observed state
-                    of AWSIAMProvision.
+                    of AWSIAMProvision's roles.
                   properties:
                     message:
                       type: string

@@ -90,9 +90,15 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		targetK8sResourceStatuses[name] = &awsIAMProvisionStatusRole.Status
 	}
 
-	k8sResourceStatusesDifferent := !cmp.Equal(sourceK8sResourceStatuses, targetK8sResourceStatuses)
+	k8sResourceStatusesEqual := cmp.Equal(sourceK8sResourceStatuses, targetK8sResourceStatuses)
+	if k8sResourceStatusesEqual {
+		r.logger.Info(fmt.Sprintf("IAM Role statuses of AWSIAMProvision equal: %s", r.request.NamespacedName))
+	} else {
+		r.logger.Info(fmt.Sprintf("IAM Role statuses of AWSIAMProvision different: %s", r.request.NamespacedName))
+	}
 
-	if awsIAMProvision.Status.Phase != "Provisioned" || awsIAMProvisionProvisioned || k8sResourceStatusesDifferent {
+	// Check all conditions indicating the resource or its status are actually updated
+	if awsIAMProvision.Status.Phase != "Provisioned" || awsIAMProvisionProvisioned || !k8sResourceStatusesEqual {
 		// Resources have been provisioned successfully
 		r.logger.Info(fmt.Sprintf("AWSIAMProvision provisioned: %s", r.request.NamespacedName))
 
