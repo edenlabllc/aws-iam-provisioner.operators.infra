@@ -188,7 +188,7 @@ func (rm *ReconciliationManager) updateCRDStatus(awsIAMProvision *iamv1alpha1.AW
 			statusRoleMessage := ""
 
 			for _, condition := range roleStatus.Conditions {
-				// if any of roleStatus.condition.Status is not True, then the overall roleStatus.phase is considere Failed
+				// if any of roleStatus.condition.Status is not True, then the overall roleStatus.phase is considered Failed
 				if condition.Status != v1.ConditionTrue {
 					statusRolePhase = "Failed"
 					statusRoleMessage = *condition.Message
