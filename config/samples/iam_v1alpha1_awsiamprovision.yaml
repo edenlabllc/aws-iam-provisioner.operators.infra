@@ -1,12 +1,12 @@
 apiVersion: iam.aws.edenlab.io/v1alpha1
 kind: AWSIAMProvision
 metadata:
-  name: deps-ffs-1
+  name: deps-develop
   namespace: capa-system
 spec:
-  eksClusterName: deps-ffs-1
+  eksClusterName: deps-develop
   roles:
-    deps-ffs-1-ebs-csi-controller:
+    deps-develop-ebs-csi-controller:
       spec:
         assumeRolePolicyDocument: |
           {
@@ -28,12 +28,12 @@ spec:
             ]
           }
         maxSessionDuration: 3600
-        name: deps-ffs-1-ebs-csi-controller
+        name: deps-develop-ebs-csi-controller
         path: /
         policyRefs:
           - from:
-              name: deps-ffs-1-ebs-csi-controller-core
+              name: deps-develop-ebs-csi-controller-core
               namespace: capa-system
           - from:
-              name: deps-ffs-1-ebs-csi-controller-kms
+              name: deps-develop-ebs-csi-controller-kms
               namespace: capa-system
