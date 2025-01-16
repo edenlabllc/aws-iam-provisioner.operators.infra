@@ -1,4 +1,8 @@
-# aws-iam-provisioner
+# AWS IAM provisioner operator
+
+[![Release](https://img.shields.io/github/v/release/edenlabllc/aws-iam-provisioner.operators.infra.svg?style=for-the-badge)](https://github.com/edenlabllc/aws-iam-provisioner.operators.infra/releases/latest)
+[![Software License](https://img.shields.io/github/license/edenlabllc/aws-iam-provisioner.operators.infra.svg?style=for-the-badge)](LICENSE)
+[![Powered By: Edenlab](https://img.shields.io/badge/powered%20by-edenlab-8A2BE2.svg?style=for-the-badge)](https://edenlab.io)
 
 The AWS IAM provisioner operator provisions IAM roles on the fly for the Kubernetes clusters
 managed using [Kubernetes Cluster API Provider AWS](https://cluster-api-aws.sigs.k8s.io/getting-started).
@@ -21,11 +25,11 @@ Custom resources (CRs) for the controller might look like the following:
 apiVersion: iam.services.k8s.aws/v1alpha1
 kind: Policy
 metadata:
-  name: deps-ffs-1-ebs-csi-controller-core
+  name: deps-develop-ebs-csi-controller-core
   namespace: capa-system
   # truncated
 spec:
-  name: deps-ffs-1-ebs-csi-controller-core
+  name: deps-develop-ebs-csi-controller-core
   # truncated
 ```
 
@@ -33,11 +37,11 @@ spec:
 apiVersion: iam.services.k8s.aws/v1alpha1
 kind: Role
 metadata:
-  name: deps-ffs-1-ebs-csi-controller
+  name: deps-develop-ebs-csi-controller
   namespace: capa-system
   # truncated
 spec:
-  name: deps-ffs-1-ebs-csi-controller
+  name: deps-develop-ebs-csi-controller
   # truncated
 ```
 
@@ -54,13 +58,13 @@ provisioning:
 apiVersion: iam.aws.edenlab.io/v1alpha1
 kind: AWSIAMProvision
 metadata:
-  name: deps-ffs-1
+  name: deps-develop
   namespace: capa-system
   # truncated
 spec:
-  eksClusterName: deps-ffs-1
+  eksClusterName: deps-develop
   roles:
-    deps-ffs-1-ebs-csi-controller:
+    deps-develop-ebs-csi-controller:
       spec:
         assumeRolePolicyDocument: |
           {
@@ -82,11 +86,11 @@ spec:
             ]
           }
         maxSessionDuration: 3600
-        name: deps-ffs-1-ebs-csi-controller
+        name: deps-develop-ebs-csi-controller
         path: /
         policyRefs:
           - from:
-              name: deps-ffs-1-ebs-csi-controller-core
+              name: deps-develop-ebs-csi-controller-core
               namespace: capa-system
   # truncated
 ```
@@ -117,16 +121,16 @@ Example of an original `AWSManagedControlPlane` resource:
 apiVersion: controlplane.cluster.x-k8s.io/v1beta2
 kind: AWSManagedControlPlane
 metadata:
-  name: deps-ffs-1
+  name: deps-develop
   namespace: capa-system
   # truncated
 spec:
   controlPlaneEndpoint:
     host: https://AAAAABBBBB0000011111222223333344.gr7.us-east-1.eks.amazonaws.com
     port: 443
-  eksClusterName: deps-ffs-1
+  eksClusterName: deps-develop
   region: us-east-1
-  roleName: deps-ffs-1-iam-service-role
+  roleName: deps-develop-iam-service-role
   version: v1.29.8
   # truncated
 ```
@@ -138,14 +142,14 @@ by the operator:
 apiVersion: iam.services.k8s.aws/v1alpha1
 kind: Role
 metadata:
-  name: deps-ffs-1-ebs-csi-controller
+  name: deps-develop-ebs-csi-controller
   namespace: capa-system
   ownerReferences:
     - apiVersion: iam.aws.edenlab.io/v1alpha1
       blockOwnerDeletion: true
       controller: true
       kind: AWSIAMProvision
-      name: deps-ffs-1
+      name: deps-develop
       uid: 77b58794-73cc-4a36-bbd9-572165ff6664
   # truncated
 spec:
@@ -169,11 +173,11 @@ spec:
       ]
     }
   maxSessionDuration: 3600
-  name: deps-ffs-1-ebs-csi-controller
+  name: deps-develop-ebs-csi-controller
   path: /
   policyRefs:
     - from:
-        name: deps-ffs-1-ebs-csi-controller-core
+        name: deps-develop-ebs-csi-controller-core
         namespace: capa-system
   # truncated
 ```
