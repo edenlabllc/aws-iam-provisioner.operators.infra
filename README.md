@@ -4,7 +4,7 @@
 [![Software License](https://img.shields.io/github/license/edenlabllc/aws-iam-provisioner.operators.infra.svg?style=for-the-badge)](LICENSE)
 [![Powered By: Edenlab](https://img.shields.io/badge/powered%20by-edenlab-8A2BE2.svg?style=for-the-badge)](https://edenlab.io)
 
-The AWS IAM provisioner operator provisions IAM roles on the fly for the Kubernetes clusters
+The AWS IAM provisioner operator provisions IAM roles and policies on the fly for the Kubernetes clusters
 managed using [Kubernetes Cluster API Provider AWS](https://cluster-api-aws.sigs.k8s.io/getting-started).
 
 ## Description

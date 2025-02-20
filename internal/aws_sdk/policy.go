@@ -3,11 +3,12 @@ package aws_sdk
 import (
 	"errors"
 	"fmt"
+	"net/http"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamType "github.com/aws/aws-sdk-go-v2/service/iam/types"
-	"net/http"
 )
 
 const (
