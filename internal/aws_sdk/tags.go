@@ -8,6 +8,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamType "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/google/go-cmp/cmp"
+
+	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
 )
 
 const (
@@ -25,6 +27,19 @@ func NewChecksumTag(policyDocument *string) iamType.Tag {
 		Key:   aws.String(TagKeyPolicyDocument),
 		Value: aws.String(fmt.Sprintf("%x", sha1.Sum([]byte(aws.ToString(policyDocument))))),
 	}
+}
+
+func ConvertToIAMTags(specTags []*iamv1alpha1.Tag) []iamType.Tag {
+	var iamTags []iamType.Tag
+
+	for _, tag := range specTags {
+		iamTags = append(iamTags, iamType.Tag{
+			Key:   tag.Key,
+			Value: tag.Value,
+		})
+	}
+
+	return iamTags
 }
 
 func TagsDefine(clusterName, namespace string, tags ...iamType.Tag) []iamType.Tag {

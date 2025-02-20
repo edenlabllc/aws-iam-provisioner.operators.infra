@@ -63,7 +63,7 @@ func (rm *ReconciliationManager) getClusterResources() (*awsIAMResources, error)
 	}
 
 	air.eksCPNamespace = types.NamespacedName{
-		Name:      air.awsIAMProvision.Spec.EksClusterName,
+		Name:      air.awsIAMProvision.Spec.EKSClusterName,
 		Namespace: rm.request.NamespacedName.Namespace,
 	}
 	if err := rm.Get(rm.ctx, air.eksCPNamespace, air.eksCP); err != nil {
@@ -130,7 +130,7 @@ func (rm *ReconciliationManager) deleteIAMResources(awsIAMProvision *iamv1alpha1
 }
 
 func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error {
-	tags := aws_sdk.TagsDefine(air.awsIAMProvision.Spec.EksClusterName, air.awsIAMProvision.Namespace)
+	tags := aws_sdk.TagsDefine(air.awsIAMProvision.Spec.EKSClusterName, air.awsIAMProvision.Namespace)
 
 	iamRoles, err := rm.IAMClient.ListRolesByTags(tags)
 	if err != nil {
@@ -288,12 +288,12 @@ func (rm *ReconciliationManager) syncPoliciesByRoleSpec(air *awsIAMResources, ro
 
 				checkSumTag := aws_sdk.NewChecksumTag(policy.Spec.PolicyDocument)
 				tags := aws_sdk.TagsDefine(
-					air.awsIAMProvision.Spec.EksClusterName,
+					air.awsIAMProvision.Spec.EKSClusterName,
 					air.awsIAMProvision.Namespace,
-					checkSumTag,
+					append(aws_sdk.ConvertToIAMTags(policy.Spec.Tags), checkSumTag)...,
 				)
 				description := fmt.Sprintf("%s%s. %s",
-					aws_sdk.PolicyDescriptionPrefix, air.awsIAMProvision.Spec.EksClusterName, aws_sdk.IAMDescription)
+					aws_sdk.PolicyDescriptionPrefix, air.awsIAMProvision.Spec.EKSClusterName, aws_sdk.IAMDescription)
 				// Creating and attaching policy if not created early.
 				if !exists {
 					result, err := rm.IAMClient.CreatePolicy(policy.Spec.Name, policy.Spec.PolicyDocument, &description, tags)
@@ -370,7 +370,10 @@ func (rm *ReconciliationManager) syncPoliciesByRoleSpec(air *awsIAMResources, ro
 }
 
 func (rm *ReconciliationManager) syncRole(air *awsIAMResources, role *iamv1alpha1.AWSIAMProvisionRole) error {
-	tags := aws_sdk.TagsDefine(air.awsIAMProvision.Spec.EksClusterName, air.awsIAMProvision.Namespace)
+	tags := aws_sdk.TagsDefine(
+		air.awsIAMProvision.Spec.EKSClusterName,
+		air.awsIAMProvision.Namespace,
+		aws_sdk.ConvertToIAMTags(role.Spec.Tags)...)
 
 	if err := rm.setAssumeRolePolicyDocument(air, role); err != nil {
 		return err
@@ -383,7 +386,7 @@ func (rm *ReconciliationManager) syncRole(air *awsIAMResources, role *iamv1alpha
 
 	if !exists {
 		description := fmt.Sprintf("%s%s. %s",
-			aws_sdk.RoleDescriptionPrefix, air.awsIAMProvision.Spec.EksClusterName, aws_sdk.IAMDescription)
+			aws_sdk.RoleDescriptionPrefix, air.awsIAMProvision.Spec.EKSClusterName, aws_sdk.IAMDescription)
 		result, err := rm.IAMClient.CreateRole(role.Spec.Name, role.Spec.AssumeRolePolicyDocument, &description, tags)
 		if err != nil {
 			return err
@@ -398,8 +401,7 @@ func (rm *ReconciliationManager) syncRole(air *awsIAMResources, role *iamv1alpha
 			return err
 		}
 	} else {
-		diff, err := rm.IAMClient.DiffRoleByParams(iamRole.AssumeRolePolicyDocument,
-			role.Spec.AssumeRolePolicyDocument, iamRole.Tags, tags)
+		diff, err := rm.IAMClient.DiffRoleByPolicyDocument(iamRole.AssumeRolePolicyDocument, role.Spec.AssumeRolePolicyDocument)
 		if err != nil {
 			return err
 		}

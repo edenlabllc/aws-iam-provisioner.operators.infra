@@ -127,9 +127,7 @@ func main() {
 	}
 
 	if err = (&controller.AWSIAMProvisionReconciler{
-		//Client:                mgr.GetClient(),
 		ReconciliationManager: &controller.ReconciliationManager{Client: mgr.GetClient(), Scheme: mgr.GetScheme()},
-		//Scheme:                mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AWSIAMProvision")
 		os.Exit(1)

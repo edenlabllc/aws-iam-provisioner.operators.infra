@@ -47,7 +47,7 @@ spec:
             description: AWSIAMProvisionSpec defines the desired state of AWSIAMProvision.
             properties:
               eksClusterName:
-                description: EksClusterName - target cluster name provisioned Cluster
+                description: EKSClusterName - target cluster name provisioned Cluster
                   API.
                 type: string
               policies:

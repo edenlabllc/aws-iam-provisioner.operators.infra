@@ -136,7 +136,7 @@ func (c *IAMClient) DetachRolePolicy(policyName, roleName *string) error {
 	return nil
 }
 
-func (c *IAMClient) DiffRoleByParams(rolePolicyDocumentA, rolePolicyDocumentB *string, tagsA, tagsB []iamType.Tag) (bool, error) {
+func (c *IAMClient) DiffRoleByPolicyDocument(rolePolicyDocumentA, rolePolicyDocumentB *string) (bool, error) {
 	roleDocA, err := c.compactRolePolicyDocument(rolePolicyDocumentA)
 	if err != nil {
 		return false, err
@@ -147,7 +147,7 @@ func (c *IAMClient) DiffRoleByParams(rolePolicyDocumentA, rolePolicyDocumentB *s
 		return false, err
 	}
 
-	return roleDocA != roleDocB && compareTags(tagsA, tagsB), nil
+	return roleDocA != roleDocB, nil
 }
 
 func (c *IAMClient) GetRoleByName(roleName *string) (*iamType.Role, bool, error) {

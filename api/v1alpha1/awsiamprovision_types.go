@@ -22,8 +22,8 @@ import (
 
 // AWSIAMProvisionSpec defines the desired state of AWSIAMProvision.
 type AWSIAMProvisionSpec struct {
-	// EksClusterName - target cluster name provisioned Cluster API.
-	EksClusterName string `json:"eksClusterName"`
+	// EKSClusterName - target cluster name provisioned Cluster API.
+	EKSClusterName string `json:"eksClusterName"`
 	// Region for AWS config authentication.
 	Region string `json:"region"`
 	// Policies - map of policies with specifications.

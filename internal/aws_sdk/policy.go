@@ -74,7 +74,7 @@ func (c *IAMClient) DeletePolicy(policyName *string) error {
 		return err
 	}
 
-	c.Logger.Info(fmt.Sprintf("delete polisy %s", *policyName))
+	c.Logger.Info(fmt.Sprintf("delete policy %s", *policyName))
 
 	return nil
 }
