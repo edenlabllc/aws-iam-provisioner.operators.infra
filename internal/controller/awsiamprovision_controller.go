@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -30,7 +31,7 @@ import (
 )
 
 const (
-	frequency = time.Second * 10
+	frequency = time.Second * 30
 )
 
 // AWSIAMProvisionReconciler reconciles a AWSIAMProvision object
@@ -64,6 +65,10 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	r.IAMClient, err = aws_sdk.NewIAMClient(air.awsIAMProvision.Spec.Region, r.logger)
 	if err != nil {
+		if err := r.updateCRDStatus(air, failPhase, "", err.Error(), nil); err != nil {
+			return ctrl.Result{}, err
+		}
+
 		return ctrl.Result{}, err
 	}
 
@@ -81,16 +86,22 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	} else {
 		// The object is being deleted
 		if controllerutil.ContainsFinalizer(air.awsIAMProvision, awsIAMProvisionFinalizerName) {
-			if err := r.updateCRDStatus(air, "Destroying", "", "Destroying AWS IAM resources.", nil); err != nil {
+			if err := r.updateCRDStatus(air, destroyIntermediatePhase, "",
+				"Destroying AWS IAM resources.", nil); err != nil {
 				return ctrl.Result{}, err
 			}
 
 			// our finalizer is present, so lets handle any external dependency
 			if err := r.deleteIAMResources(air.awsIAMProvision); err != nil {
+				if err := r.updateCRDStatus(air, failPhase, "", err.Error(), nil); err != nil {
+					return ctrl.Result{}, err
+				}
+
 				return ctrl.Result{}, err
 			}
 
-			if err := r.updateCRDStatus(air, "Destroyed", "", "Destroyed AWS IAM resources.", nil); err != nil {
+			if err := r.updateCRDStatus(air, destroyPhase, "",
+				"AWS IAM resources was destroyed.", nil); err != nil {
 				return ctrl.Result{}, err
 			}
 
@@ -116,6 +127,14 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 
 		if err := r.syncPoliciesByRoleSpec(air, &role); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if air.awsIAMProvision.Status.LastUpdatedTime == nil || air.awsIAMProvision.Status.Phase == "Failed" {
+		msg := fmt.Sprintf("AWS IAM resoursies was synced with remote state.")
+		r.logger.Info(msg)
+		if err := r.updateCRDStatus(air, successPhase, "", msg, nil); err != nil {
 			return ctrl.Result{}, err
 		}
 	}

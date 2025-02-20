@@ -3,22 +3,21 @@ package controller
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"text/template"
-	"time"
 
-	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
-	"aws-iam-provisioner.operators.infra/internal/aws_sdk"
+	iamType "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/go-logr/logr"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ekscontrolplanev1 "sigs.k8s.io/cluster-api-provider-aws/v2/controlplane/eks/api/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
+	"aws-iam-provisioner.operators.infra/internal/aws_sdk"
 )
 
 const awsIAMProvisionFinalizerName = "awsiamprovision.iam.aws.edenlab.io/finalizer"
@@ -72,15 +71,14 @@ func (rm *ReconciliationManager) getClusterResources() (*awsIAMResources, error)
 			msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not found: %s",
 				rm.request.NamespacedName, air.eksCPNamespace)
 			rm.logger.Info(msg)
-
-			if err := rm.updateCRDStatus(air, "Provisioning", "", msg, nil); err != nil {
+			if err := rm.updateCRDStatus(air, intermediatePhase, "", msg, nil); err != nil {
 				return nil, err
 			}
 
 			return nil, nil
 		}
 
-		if err := rm.updateCRDStatus(air, "Failed", "", err.Error(), nil); err != nil {
+		if err := rm.updateCRDStatus(air, failPhase, "", err.Error(), nil); err != nil {
 			return nil, err
 		}
 
@@ -91,7 +89,7 @@ func (rm *ReconciliationManager) getClusterResources() (*awsIAMResources, error)
 		msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not ready: %s",
 			rm.request.NamespacedName, air.eksCPNamespace)
 		rm.logger.Info(msg)
-		if err := rm.updateCRDStatus(air, "Provisioning", "", msg, nil); err != nil {
+		if err := rm.updateCRDStatus(air, intermediatePhase, "", msg, nil); err != nil {
 			return nil, err
 		}
 
@@ -178,11 +176,17 @@ func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error
 			if err := rm.IAMClient.DetachRolePolicy(&detachRolePolicy, role.Spec.Name); err != nil {
 				return err
 			}
+
+			if err := rm.updateCRDStatus(air, successPhase, detachPhase,
+				fmt.Sprintf("Policy %s was detached from role %s.", detachRolePolicy, *role.Spec.Name),
+				&iamType.Policy{PolicyName: &detachRolePolicy}); err != nil {
+				return err
+			}
 		}
 	}
 
 	for role := range deleteRoles {
-		_, exists, err := rm.IAMClient.GetRoleByName(&role)
+		iamRole, exists, err := rm.IAMClient.GetRoleByName(&role)
 		if err != nil {
 			return err
 		}
@@ -193,11 +197,24 @@ func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error
 				return err
 			}
 
-			if err := rm.IAMClient.BatchAttachDetachRolePolicies(aws_sdk.ButchDetachProc, policies, &role); err != nil {
-				return err
+			for _, policy := range policies {
+				if err := rm.IAMClient.DetachRolePolicy(policy.PolicyName, &role); err != nil {
+					return err
+				}
+
+				if err := rm.updateCRDStatus(air, successPhase, detachPhase,
+					fmt.Sprintf("Policy %s was detached from role %s.", *policy.PolicyName, role),
+					&policy); err != nil {
+					return err
+				}
 			}
 
 			if err := rm.IAMClient.DeleteRole(&role); err != nil {
+				return err
+			}
+
+			if err := rm.updateCRDStatus(air, successPhase, deletePhase,
+				fmt.Sprintf("Role %s was deleted.", *iamRole.RoleName), iamRole); err != nil {
 				return err
 			}
 		}
@@ -230,6 +247,11 @@ func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error
 				if err := rm.IAMClient.DeletePolicy(policy.PolicyName); err != nil {
 					return err
 				}
+
+				if err := rm.updateCRDStatus(air, successPhase, deletePhase,
+					fmt.Sprintf("Policy %s was deleted.", *policy.PolicyName), policy); err != nil {
+					return err
+				}
 			}
 
 			for _, role := range entities {
@@ -239,6 +261,11 @@ func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error
 					}
 
 					if err := rm.IAMClient.DeletePolicy(policy.PolicyName); err != nil {
+						return err
+					}
+
+					if err := rm.updateCRDStatus(air, successPhase, deletePhase,
+						fmt.Sprintf("Policy %s was deleted.", *policy.PolicyName), policy); err != nil {
 						return err
 					}
 				}
@@ -278,9 +305,9 @@ func (rm *ReconciliationManager) syncPoliciesByRoleSpec(air *awsIAMResources, ro
 						return err
 					}
 
-					if err := rm.updateCRDStatus(air, "Provisioned", "Created and Attached",
+					if err := rm.updateCRDStatus(air, successPhase, createPhase+attachPhase,
 						fmt.Sprintf("Policy %s was created and attached with role %s.",
-							*policy.Spec.Name, *role.Spec.Name), aws_sdk.IAMPolicy(result)); err != nil {
+							*policy.Spec.Name, *role.Spec.Name), result); err != nil {
 						return err
 					}
 				} else {
@@ -304,9 +331,9 @@ func (rm *ReconciliationManager) syncPoliciesByRoleSpec(air *awsIAMResources, ro
 								return err
 							}
 
-							if err := rm.updateCRDStatus(air, "Provisioned", "CreatedAttached",
+							if err := rm.updateCRDStatus(air, successPhase, updatePhase,
 								fmt.Sprintf("Policy document for policy %s was updated.",
-									*policy.Spec.Name), aws_sdk.IAMPolicy(iamPolicy)); err != nil {
+									*policy.Spec.Name), iamPolicy); err != nil {
 								return err
 							}
 						}
@@ -328,9 +355,9 @@ func (rm *ReconciliationManager) syncPoliciesByRoleSpec(air *awsIAMResources, ro
 							return err
 						}
 
-						if err := rm.updateCRDStatus(air, "Provisioned", "Attached",
+						if err := rm.updateCRDStatus(air, successPhase, attachPhase,
 							fmt.Sprintf("Policy %s was attached to role %s.",
-								*policy.Spec.Name, *role.Spec.Name), aws_sdk.IAMPolicy(iamPolicy)); err != nil {
+								*policy.Spec.Name, *role.Spec.Name), iamPolicy); err != nil {
 							return err
 						}
 					}
@@ -362,8 +389,8 @@ func (rm *ReconciliationManager) syncRole(air *awsIAMResources, role *iamv1alpha
 			return err
 		}
 
-		if err := rm.updateCRDStatus(air, "Provisioned", "Created",
-			fmt.Sprintf("Role %s was created.", *role.Spec.Name), aws_sdk.IAMRole(result)); err != nil {
+		if err := rm.updateCRDStatus(air, successPhase, createPhase,
+			fmt.Sprintf("Role %s was created.", *role.Spec.Name), result); err != nil {
 			return err
 		}
 
@@ -382,9 +409,9 @@ func (rm *ReconciliationManager) syncRole(air *awsIAMResources, role *iamv1alpha
 				return err
 			}
 
-			if err := rm.updateCRDStatus(air, "Provisioned", "Updated",
+			if err := rm.updateCRDStatus(air, successPhase, updatePhase,
 				fmt.Sprintf("The trust relationship policy document for role %s was updated.",
-					*role.Spec.Name), aws_sdk.IAMRole(iamRole)); err != nil {
+					*role.Spec.Name), iamRole); err != nil {
 				return err
 			}
 		}
@@ -397,98 +424,6 @@ func (rm *ReconciliationManager) syncRole(air *awsIAMResources, role *iamv1alpha
 	return nil
 }
 
-func (rm *ReconciliationManager) updateCRDStatus(air *awsIAMResources, crdPhase, phase, message string, result interface{}) error {
-	var (
-		ownerAccountID = iamv1alpha1.AWSAccountID(rm.IAMClient.GetIAMClientMetadata().AccountID)
-		region         = iamv1alpha1.AWSRegion(rm.IAMClient.GetIAMClientMetadata().Region)
-	)
-
-	switch r := result.(type) {
-	case aws_sdk.IAMRole:
-		role, _, err := rm.IAMClient.GetRoleByName(r.RoleName)
-		if err != nil {
-			return err
-		}
-
-		arn := iamv1alpha1.AWSResourceName(*r.Arn)
-		awsIAMProvisionStatusRole := iamv1alpha1.AWSIAMProvisionStatusRole{
-			Name:    r.RoleName,
-			Message: message,
-			Phase:   phase,
-			Status: iamv1alpha1.RoleStatus{
-				AWSIAMResourceMetadata: &iamv1alpha1.AWSIAMResourceMetadata{
-					ARN:            &arn,
-					OwnerAccountID: &ownerAccountID,
-					Region:         &region,
-				},
-				CreateDate: &metav1.Time{Time: *r.CreateDate},
-				RoleID:     r.RoleId,
-			},
-		}
-
-		nums := make(map[bool]int)
-		for num, roleStatus := range air.awsIAMProvision.Status.Roles {
-			if *roleStatus.Name == *role.RoleName {
-				nums[true] = num
-				break
-			}
-		}
-
-		if num, ok := nums[true]; ok {
-			air.awsIAMProvision.Status.Roles[num] = awsIAMProvisionStatusRole
-		} else {
-			air.awsIAMProvision.Status.Roles = append(air.awsIAMProvision.Status.Roles, awsIAMProvisionStatusRole)
-		}
-	case aws_sdk.IAMPolicy:
-		policy, _, err := rm.IAMClient.GetPolicyByName(r.PolicyName)
-		if err != nil {
-			return err
-		}
-
-		arn := iamv1alpha1.AWSResourceName(*policy.Arn)
-		awsIAMProvisionStatusPolicy := iamv1alpha1.AWSIAMProvisionStatusPolicy{
-			Name:    policy.PolicyName,
-			Message: message,
-			Phase:   phase,
-			Status: iamv1alpha1.PolicyStatus{
-				AWSIAMResourceMetadata: &iamv1alpha1.AWSIAMResourceMetadata{
-					ARN:            &arn,
-					OwnerAccountID: &ownerAccountID,
-					Region:         &region,
-				},
-				AttachmentCount:  policy.AttachmentCount,
-				DefaultVersionID: policy.DefaultVersionId,
-				CreateDate:       &metav1.Time{Time: *policy.CreateDate},
-				PolicyID:         policy.PolicyId,
-			},
-		}
-
-		nums := make(map[bool]int)
-		for num, policyStatus := range air.awsIAMProvision.Status.Policies {
-			if *policyStatus.Name == *policy.PolicyName {
-				nums[true] = num
-				break
-			}
-		}
-
-		if num, ok := nums[true]; ok {
-			air.awsIAMProvision.Status.Policies[num] = awsIAMProvisionStatusPolicy
-		} else {
-			air.awsIAMProvision.Status.Policies = append(air.awsIAMProvision.Status.Policies, awsIAMProvisionStatusPolicy)
-		}
-	}
-
-	air.awsIAMProvision.Status.LastUpdatedTime = &metav1.Time{Time: time.Now()}
-	air.awsIAMProvision.Status.Phase = crdPhase
-	air.awsIAMProvision.Status.Message = message
-
-	if err := rm.Status().Update(rm.ctx, air.awsIAMProvision); err != nil {
-		return errors.New(fmt.Sprintf("Unable to update status for CRD: %s, error: %s", air.awsIAMProvision.Name, err))
-	}
-
-	return nil
-}
-
 func (rm *ReconciliationManager) setAssumeRolePolicyDocument(air *awsIAMResources, role *iamv1alpha1.AWSIAMProvisionRole) error {
 	var oidcProviderARNFound bool
 
@@ -496,10 +431,9 @@ func (rm *ReconciliationManager) setAssumeRolePolicyDocument(air *awsIAMResource
 	_, oidcPr.OIDCProviderName, oidcProviderARNFound = strings.Cut(oidcPr.OIDCProviderARN, "/")
 
 	if !oidcProviderARNFound {
-		err := errors.New(
-			fmt.Sprintf("OIDC ARN of %s AWSManagedControlPlane of %s AWSIAMProvision malformed: %s",
-				air.eksCPNamespace, rm.request.NamespacedName, oidcPr.OIDCProviderARN))
-		if err := rm.updateCRDStatus(air, "Failed", "", err.Error(), nil); err != nil {
+		err := fmt.Errorf("OIDC ARN of %s AWSManagedControlPlane of %s AWSIAMProvision malformed: %s",
+			air.eksCPNamespace, rm.request.NamespacedName, oidcPr.OIDCProviderARN)
+		if err := rm.updateCRDStatus(air, failPhase, "", err.Error(), nil); err != nil {
 			return err
 		}
 
@@ -507,7 +441,7 @@ func (rm *ReconciliationManager) setAssumeRolePolicyDocument(air *awsIAMResource
 	}
 
 	if assumeRolePolicyDocument, err := rm.renderOIDCProviderTemplate(*role.Spec.AssumeRolePolicyDocument, oidcPr); err != nil {
-		if err := rm.updateCRDStatus(air, "Failed", "", err.Error(), nil); err != nil {
+		if err := rm.updateCRDStatus(air, failPhase, "", err.Error(), nil); err != nil {
 			return err
 		}
 

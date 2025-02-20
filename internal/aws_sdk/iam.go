@@ -47,10 +47,6 @@ type IAMClientMetadata struct {
 	Region    string
 }
 
-type IAMPolicy *iamType.Policy
-
-type IAMRole *iamType.Role
-
 func NewIAMClient(region string, logger logr.Logger) (*IAMClient, error) {
 	ctx := context.TODO()
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
