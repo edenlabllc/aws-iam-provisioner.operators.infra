@@ -24,6 +24,9 @@ import (
 type AWSIAMProvisionSpec struct {
 	// EKSClusterName - target cluster name provisioned Cluster API.
 	EKSClusterName string `json:"eksClusterName"`
+	// Frequency - AWS IAM resources synchronization frequency.
+	// It is not recommended to set values below 30s to avoid being blocked by the AWS API.
+	Frequency *metav1.Duration `json:"frequency,omitempty"`
 	// Region for AWS config authentication.
 	Region string `json:"region"`
 	// Policies - map of policies with specifications.

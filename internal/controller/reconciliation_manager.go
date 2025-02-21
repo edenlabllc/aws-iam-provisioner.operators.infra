@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+	"time"
 
 	iamType "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/go-logr/logr"
@@ -48,6 +49,14 @@ func newAWSIAMResources() *awsIAMResources {
 		eksCP:           &ekscontrolplanev1.AWSManagedControlPlane{},
 		eksCPNamespace:  types.NamespacedName{},
 	}
+}
+
+func setFrequency(air *awsIAMResources) time.Duration {
+	if air != nil {
+		return air.awsIAMProvision.Spec.Frequency.Duration
+	}
+
+	return frequency
 }
 
 func (rm *ReconciliationManager) getClusterResources() (*awsIAMResources, error) {
