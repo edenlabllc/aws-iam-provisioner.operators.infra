@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	frequency = time.Second * 30
+	frequency = time.Second * 10
 )
 
 // AWSIAMProvisionReconciler reconciles a AWSIAMProvision object
@@ -60,7 +60,7 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if air == nil {
 		// Resources not ready, re-queuing
-		return ctrl.Result{RequeueAfter: frequency}, nil
+		return ctrl.Result{RequeueAfter: setTimer(air)}, nil
 	}
 
 	r.IAMClient, err = aws_sdk.NewIAMClient(air.awsIAMProvision.Spec.Region, r.logger)
@@ -131,15 +131,15 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
+	msg := fmt.Sprintf("AWS IAM resources synced with the remote state.")
+	r.logger.Info(msg)
 	if air.awsIAMProvision.Status.LastUpdatedTime == nil || air.awsIAMProvision.Status.Phase == "Failed" {
-		msg := fmt.Sprintf("AWS IAM resoursies was synced with remote state.")
-		r.logger.Info(msg)
 		if err := r.updateCRDStatus(air, successPhase, "", msg, nil); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: frequency}, nil
+	return ctrl.Result{RequeueAfter: setTimer(air)}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

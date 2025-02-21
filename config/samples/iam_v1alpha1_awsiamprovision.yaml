@@ -5,6 +5,7 @@ metadata:
   namespace: capa-system
 spec:
   eksClusterName: deps-develop
+  frequency: 1m
   region: us-east-1
   roles:
     deps-develop-ebs-csi-controller:
