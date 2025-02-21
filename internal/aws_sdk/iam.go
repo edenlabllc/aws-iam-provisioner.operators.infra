@@ -19,18 +19,18 @@ type IAMManager interface {
 	AttachRolePolicy(policyName, roleName *string) error
 	BatchAttachDetachRolePolicies(proc string, policies []iamType.Policy, roleName *string) error
 	BatchDeletePolicies(policies []iamType.Policy) error
-	DiffRoleByPolicyDocument(rolePolicyDocumentA, rolePolicyDocumentB *string) (bool, error)
 	CreatePolicy(policyName, policyData, description *string, tags []iamType.Tag) (*iamType.Policy, error)
 	CreateRole(roleName, assumeRolePolicyDocument, description *string, tags []iamType.Tag) (*iamType.Role, error)
 	DeletePolicy(policyName *string) error
 	DeleteRole(roleName *string) error
 	DetachRolePolicy(policyName, roleName *string) error
+	DiffRoleByPolicyDocument(rolePolicyDocumentA, rolePolicyDocumentB *string) (bool, error)
 	GetIAMClientMetadata() *IAMClientMetadata
 	GetPolicyByName(policyName *string) (*iamType.Policy, bool, error)
 	GetRoleByName(roleName *string) (*iamType.Role, bool, error)
 	ListAttachedRolePolicies(roleName *string) ([]iamType.Policy, error)
-	ListPoliciesByTags(tags []iamType.Tag) ([]iamType.Policy, error)
 	ListEntitiesForPolicy(policy *iamType.Policy) ([]iamType.PolicyRole, error)
+	ListPoliciesByTags(tags []iamType.Tag) ([]iamType.Policy, error)
 	ListRolesByTags(tags []iamType.Tag) ([]iamType.Role, error)
 	UpdateRole(roleName, assumeRolePolicyDocument *string) error
 }
