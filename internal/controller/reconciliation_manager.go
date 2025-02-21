@@ -51,7 +51,7 @@ func newAWSIAMResources() *awsIAMResources {
 	}
 }
 
-func setTimer(air *awsIAMResources) time.Duration {
+func setFrequency(air *awsIAMResources) time.Duration {
 	if air != nil {
 		return air.awsIAMProvision.Spec.Frequency.Duration
 	}

@@ -60,7 +60,7 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if air == nil {
 		// Resources not ready, re-queuing
-		return ctrl.Result{RequeueAfter: setTimer(air)}, nil
+		return ctrl.Result{RequeueAfter: setFrequency(air)}, nil
 	}
 
 	r.IAMClient, err = aws_sdk.NewIAMClient(air.awsIAMProvision.Spec.Region, r.logger)
@@ -139,7 +139,7 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: setTimer(air)}, nil
+	return ctrl.Result{RequeueAfter: setFrequency(air)}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
