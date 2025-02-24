@@ -21,15 +21,13 @@ import (
 	"fmt"
 	"time"
 
-	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
-	"github.com/google/go-cmp/cmp"
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
+	"aws-iam-provisioner.operators.infra/internal/aws_sdk"
 )
 
 const (
@@ -38,9 +36,7 @@ const (
 
 // AWSIAMProvisionReconciler reconciles a AWSIAMProvision object
 type AWSIAMProvisionReconciler struct {
-	client.Client
 	*ReconciliationManager
-	Scheme *runtime.Scheme
 }
 
 // +kubebuilder:rbac:groups=iam.aws.edenlab.io,resources=awsiamprovisions,verbs=get;list;watch;create;update;patch;delete
@@ -53,61 +49,97 @@ type AWSIAMProvisionReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.1/pkg/reconcile
 func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	r.ctx = ctx
+	r.logger = log.FromContext(ctx)
+	r.request = req
 
-	r.ReconciliationManager = &ReconciliationManager{&ctx, r.Client, &logger, &req, r.Scheme, r.Status()}
-
-	awsIAMProvision, eksControlPlane, err := r.getClusterResources()
+	air, err := r.getClusterResources()
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if awsIAMProvision == nil || eksControlPlane == nil {
+	if air == nil {
 		// Resources not ready, re-queuing
-		return ctrl.Result{RequeueAfter: frequency}, nil
+		return ctrl.Result{RequeueAfter: setFrequency(air)}, nil
 	}
 
-	awsIAMProvisionProvisioned := false
-	sourceK8sResourceStatuses := make(map[string]*iamctrlv1alpha1.RoleStatus)
-	for name, item := range awsIAMProvision.Spec.Roles {
-		k8sResource, k8sResourceUpdated, err := r.handleRole(awsIAMProvision, eksControlPlane, name, &item)
-
-		if err != nil {
+	r.IAMClient, err = aws_sdk.NewIAMClient(air.awsIAMProvision.Spec.Region, r.logger)
+	if err != nil {
+		if err := r.updateCRDStatus(air, failPhase, "", err.Error(), nil); err != nil {
 			return ctrl.Result{}, err
 		}
 
-		if k8sResource != nil {
-			sourceK8sResourceStatuses[k8sResource.Name] = &k8sResource.Status
-		}
-
-		if k8sResourceUpdated {
-			awsIAMProvisionProvisioned = true
-		}
+		return ctrl.Result{}, err
 	}
 
-	targetK8sResourceStatuses := make(map[string]*iamctrlv1alpha1.RoleStatus)
-	for name, awsIAMProvisionStatusRole := range awsIAMProvision.Status.Roles {
-		targetK8sResourceStatuses[name] = &awsIAMProvisionStatusRole.Status
-	}
-
-	k8sResourceStatusesEqual := cmp.Equal(sourceK8sResourceStatuses, targetK8sResourceStatuses)
-	if k8sResourceStatusesEqual {
-		r.logger.Info(fmt.Sprintf("IAM Role statuses of AWSIAMProvision equal: %s", r.request.NamespacedName))
+	// examine DeletionTimestamp to determine if object is under deletion
+	if air.awsIAMProvision.ObjectMeta.DeletionTimestamp.IsZero() {
+		// The object is not being deleted, so if it does not have our finalizer,
+		// then lets add the finalizer and update the object. This is equivalent
+		// to registering our finalizer.
+		if !controllerutil.ContainsFinalizer(air.awsIAMProvision, awsIAMProvisionFinalizerName) {
+			controllerutil.AddFinalizer(air.awsIAMProvision, awsIAMProvisionFinalizerName)
+			if err := r.Update(r.ctx, air.awsIAMProvision); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 	} else {
-		r.logger.Info(fmt.Sprintf("IAM Role statuses of AWSIAMProvision different: %s", r.request.NamespacedName))
+		// The object is being deleted
+		if controllerutil.ContainsFinalizer(air.awsIAMProvision, awsIAMProvisionFinalizerName) {
+			if err := r.updateCRDStatus(air, destroyIntermediatePhase, "",
+				"Destroying AWS IAM resources.", nil); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			// our finalizer is present, so lets handle any external dependency
+			if err := r.deleteIAMResources(air.awsIAMProvision); err != nil {
+				if err := r.updateCRDStatus(air, failPhase, "", err.Error(), nil); err != nil {
+					return ctrl.Result{}, err
+				}
+
+				return ctrl.Result{}, err
+			}
+
+			if err := r.updateCRDStatus(air, destroyPhase, "",
+				"AWS IAM resources was destroyed.", nil); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			time.Sleep(time.Second * 3)
+
+			// remove our finalizer from the list and update it.
+			controllerutil.RemoveFinalizer(air.awsIAMProvision, awsIAMProvisionFinalizerName)
+			if err := r.Update(r.ctx, air.awsIAMProvision); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+		return ctrl.Result{}, nil
 	}
 
-	// Check all conditions indicating the resource or its status are actually updated
-	if awsIAMProvision.Status.Phase != "Provisioned" || awsIAMProvisionProvisioned || !k8sResourceStatusesEqual {
-		// Resources have been provisioned successfully
-		r.logger.Info(fmt.Sprintf("AWSIAMProvision provisioned: %s", r.request.NamespacedName))
+	if err := r.syncAWSIAMResources(air); err != nil {
+		return ctrl.Result{}, err
+	}
 
-		if err := r.updateCRDStatus(awsIAMProvision, "Provisioned", "", sourceK8sResourceStatuses); err != nil {
+	for _, role := range air.awsIAMProvision.Spec.Roles {
+		if err := r.syncRole(air, &role); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err := r.syncPoliciesByRoleSpec(air, &role); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: frequency}, nil
+	msg := fmt.Sprintf("AWS IAM resources synced with the remote state.")
+	r.logger.Info(msg)
+	if air.awsIAMProvision.Status.LastUpdatedTime == nil || air.awsIAMProvision.Status.Phase == "Failed" {
+		if err := r.updateCRDStatus(air, provisionPhase, "", msg, nil); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return ctrl.Result{RequeueAfter: setFrequency(air)}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -115,6 +147,5 @@ func (r *AWSIAMProvisionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&iamv1alpha1.AWSIAMProvision{}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
-		Owns(&iamctrlv1alpha1.Role{}). // trigger the r.Reconcile whenever an Own-ed resource is created/updated/deleted
 		Complete(r)
 }

@@ -17,41 +17,31 @@ limitations under the License.
 package v1alpha1
 
 import (
-	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-type AWSIAMProvisionRole struct {
-	Spec iamctrlv1alpha1.RoleSpec `json:"spec"`
-}
-
 // AWSIAMProvisionSpec defines the desired state of AWSIAMProvision.
 type AWSIAMProvisionSpec struct {
-	// Important: Run "make" to regenerate code after modifying this file
-
-	EksClusterName string                         `json:"eksClusterName"`
-	Roles          map[string]AWSIAMProvisionRole `json:"roles"`
-}
-
-// AWSIAMProvisionStatusRole defines the observed state of AWSIAMProvision's roles.
-type AWSIAMProvisionStatusRole struct {
-	// Important: Run "make" to regenerate code after modifying this file
-
-	Message string                     `json:"message,omitempty"`
-	Phase   string                     `json:"phase,omitempty"`
-	Status  iamctrlv1alpha1.RoleStatus `json:"status,omitempty"`
+	// EKSClusterName - target EKS cluster name provisioned by Cluster API.
+	EKSClusterName string `json:"eksClusterName"`
+	// Frequency - AWS IAM resources synchronization frequency.
+	// It is not recommended to set values below 30s to avoid being blocked by the AWS API.
+	Frequency *metav1.Duration `json:"frequency,omitempty"`
+	// Region for AWS config authentication.
+	Region string `json:"region"`
+	// Policies - map of policies with specifications.
+	Policies map[string]AWSIAMProvisionPolicy `json:"policies,omitempty"`
+	// Roles - map of roles with specifications.
+	Roles map[string]AWSIAMProvisionRole `json:"roles,omitempty"`
 }
 
 // AWSIAMProvisionStatus defines the observed state of AWSIAMProvision.
 type AWSIAMProvisionStatus struct {
-	// Important: Run "make" to regenerate code after modifying this file
-
-	Message         string                               `json:"message,omitempty"`
-	LastUpdatedTime *metav1.Time                         `json:"lastUpdatedTime,omitempty"`
-	Phase           string                               `json:"phase,omitempty"`
-	Roles           map[string]AWSIAMProvisionStatusRole `json:"roles,omitempty"`
+	Message         string                        `json:"message,omitempty"`
+	LastUpdatedTime *metav1.Time                  `json:"lastUpdatedTime,omitempty"`
+	Phase           string                        `json:"phase,omitempty"`
+	Policies        []AWSIAMProvisionStatusPolicy `json:"policies,omitempty"`
+	Roles           []AWSIAMProvisionStatusRole   `json:"roles,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -76,6 +66,34 @@ type AWSIAMProvisionList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []AWSIAMProvision `json:"items"`
 }
+
+// AWSIAMResourceMetadata is common to all custom resources (CRs) managed by an ACK
+// service controller. It is contained in the CR's `Status` member field and
+// comprises various status and identifier fields useful to ACK for tracking
+// state changes between Kubernetes and the backend AWS service API.
+type AWSIAMResourceMetadata struct {
+	// ARN is the Amazon Resource Name for the resource. This is a
+	// globally-unique identifier and is set only by the ACK service controller
+	// once the controller has orchestrated the creation of the resource OR
+	// when it has verified that an "adopted" resource (a resource where the
+	// ARN annotation was set by the Kubernetes user on the CR) exists and
+	// matches the supplied CR's Spec field values.
+	ARN *AWSResourceName `json:"arn,omitempty"`
+	// OwnerAccountID is the AWS Account ID of the account that owns the
+	// backend AWS service API resource.
+	OwnerAccountID *AWSAccountID `json:"ownerAccountID"`
+	// Region is the AWS region in which the resource exists or will exist.
+	Region *AWSRegion `json:"region"`
+}
+
+// AWSRegion represents an AWS regional identifier
+type AWSRegion string
+
+// AWSAccountID represents an AWS account identifier
+type AWSAccountID string
+
+// AWSResourceName represents an AWS Resource Name (ARN)
+type AWSResourceName string
 
 func init() {
 	SchemeBuilder.Register(&AWSIAMProvision{}, &AWSIAMProvisionList{})

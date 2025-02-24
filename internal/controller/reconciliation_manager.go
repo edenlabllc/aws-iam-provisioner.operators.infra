@@ -3,19 +3,14 @@ package controller
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"text/template"
 	"time"
 
-	iamctrlv1alpha1 "github.com/aws-controllers-k8s/iam-controller/apis/v1alpha1"
-	ackv1alpha1 "github.com/aws-controllers-k8s/runtime/apis/core/v1alpha1"
+	iamType "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/go-logr/logr"
-	"github.com/google/go-cmp/cmp"
-	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ekscontrolplanev1 "sigs.k8s.io/cluster-api-provider-aws/v2/controlplane/eks/api/v1beta2"
@@ -23,14 +18,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	iamv1alpha1 "aws-iam-provisioner.operators.infra/api/v1alpha1"
+	"aws-iam-provisioner.operators.infra/internal/aws_sdk"
 )
 
-var (
-	roleMeta = metav1.TypeMeta{
-		APIVersion: "iam.services.k8s.aws",
-		Kind:       "Role",
-	}
-)
+const awsIAMProvisionFinalizerName = "awsiamprovision.iam.aws.edenlab.io/finalizer"
+
+type awsIAMResources struct {
+	awsIAMProvision *iamv1alpha1.AWSIAMProvision
+	eksCP           *ekscontrolplanev1.AWSManagedControlPlane
+	eksCPNamespace  types.NamespacedName
+}
 
 type oidcProviderTemplateData struct {
 	OIDCProviderARN  string
@@ -38,293 +35,449 @@ type oidcProviderTemplateData struct {
 }
 
 type ReconciliationManager struct {
-	context *context.Context
-	client  client.Client
-	logger  *logr.Logger
-	request *ctrl.Request
-	scheme  *runtime.Scheme
-	status  client.SubResourceWriter
+	client.Client
+	ctx       context.Context
+	IAMClient aws_sdk.IAMManager
+	logger    logr.Logger
+	request   ctrl.Request
+	Scheme    *runtime.Scheme
 }
 
-func (rm *ReconciliationManager) getClusterResources() (*iamv1alpha1.AWSIAMProvision, *ekscontrolplanev1.AWSManagedControlPlane, error) {
-	awsIAMProvision := &iamv1alpha1.AWSIAMProvision{}
+func newAWSIAMResources() *awsIAMResources {
+	return &awsIAMResources{
+		awsIAMProvision: &iamv1alpha1.AWSIAMProvision{},
+		eksCP:           &ekscontrolplanev1.AWSManagedControlPlane{},
+		eksCPNamespace:  types.NamespacedName{},
+	}
+}
 
-	if err := rm.client.Get(*rm.context, rm.request.NamespacedName, awsIAMProvision); err != nil {
+func setFrequency(air *awsIAMResources) time.Duration {
+	if air != nil {
+		if air.awsIAMProvision.Spec.Frequency != nil {
+			return air.awsIAMProvision.Spec.Frequency.Duration
+		} else {
+			return time.Second * 30
+		}
+	}
+
+	return frequency
+}
+
+func (rm *ReconciliationManager) getClusterResources() (*awsIAMResources, error) {
+	air := newAWSIAMResources()
+	if err := rm.Get(rm.ctx, rm.request.NamespacedName, air.awsIAMProvision); err != nil {
 		if k8serrors.IsNotFound(err) {
 			rm.logger.Info(fmt.Sprintf("AWSIAMProvision not found: %s", rm.request.NamespacedName))
 
-			return nil, nil, nil
+			return nil, nil
 		}
 
-		return nil, nil, err
+		return nil, err
 	}
 
-	rm.logger.Info(fmt.Sprintf("AWSIAMProvision found: %s", rm.request.NamespacedName))
-
-	eksControlPlane := &ekscontrolplanev1.AWSManagedControlPlane{}
-	namespacedName := types.NamespacedName{Name: awsIAMProvision.Spec.EksClusterName, Namespace: rm.request.NamespacedName.Namespace}
-
-	if err := rm.client.Get(*rm.context, namespacedName, eksControlPlane); err != nil {
+	air.eksCPNamespace = types.NamespacedName{
+		Name:      air.awsIAMProvision.Spec.EKSClusterName,
+		Namespace: rm.request.NamespacedName.Namespace,
+	}
+	if err := rm.Get(rm.ctx, air.eksCPNamespace, air.eksCP); err != nil {
 		if k8serrors.IsNotFound(err) {
-			msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not found: %s", rm.request.NamespacedName, namespacedName)
+			msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not found: %s",
+				rm.request.NamespacedName, air.eksCPNamespace)
 			rm.logger.Info(msg)
-
-			if err := rm.updateCRDStatus(awsIAMProvision, "Provisioning", msg, nil); err != nil {
-				return nil, nil, err
+			if err := rm.updateCRDStatus(air, provisionIntermediatePhase, "", msg, nil); err != nil {
+				return nil, err
 			}
 
-			return nil, nil, nil
+			return nil, nil
 		}
 
-		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
-			return nil, nil, err
-		}
-
-		return nil, nil, err
-	}
-
-	rm.logger.Info(fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision found: %s", rm.request.NamespacedName, namespacedName))
-
-	if !eksControlPlane.Status.Ready {
-		msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not ready: %s", rm.request.NamespacedName, namespacedName)
-		rm.logger.Info(msg)
-
-		if err := rm.updateCRDStatus(awsIAMProvision, "Provisioning", msg, nil); err != nil {
-			return nil, nil, err
-		}
-
-		return nil, nil, nil
-	}
-
-	return awsIAMProvision, eksControlPlane, nil
-}
-
-func (rm *ReconciliationManager) handleRole(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, name string, item *iamv1alpha1.AWSIAMProvisionRole) (*iamctrlv1alpha1.Role, bool, error) {
-	k8sResource := &iamctrlv1alpha1.Role{}
-	namespacedName := types.NamespacedName{Name: name, Namespace: rm.request.NamespacedName.Namespace}
-
-	if err := rm.client.Get(*rm.context, namespacedName, k8sResource); err != nil {
-		if !k8serrors.IsNotFound(err) {
-			return nil, false, err
-		}
-
-		// Create new role
-		if err := rm.setDefaultValues(awsIAMProvision, eksControlPlane, item); err != nil {
-			return nil, false, err
-		}
-
-		if err := rm.validateRolePolicyRefs(awsIAMProvision, item); err != nil {
-			return nil, false, err
-		}
-
-		k8sResource.TypeMeta = roleMeta
-		k8sResource.ObjectMeta = metav1.ObjectMeta{
-			Name:      name,
-			Namespace: rm.request.NamespacedName.Namespace,
-		}
-		k8sResource.Spec = item.Spec
-
-		// Set ownerReferences to ensure that the created resource will be deleted when the custom resource object is removed
-		if err := ctrl.SetControllerReference(awsIAMProvision, k8sResource, rm.scheme); err != nil {
-			if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
-				return nil, false, err
-			}
-
-			return nil, false, err
-		}
-
-		if err = rm.client.Create(*rm.context, k8sResource); err != nil {
-			if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
-				return nil, false, err
-			}
-
-			return nil, false, err
-		}
-
-		rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision created: %s", rm.request.NamespacedName, namespacedName))
-
-		return k8sResource, true, nil
-	}
-
-	if err := rm.setDefaultValues(awsIAMProvision, eksControlPlane, item); err != nil {
-		return nil, false, err
-	}
-
-	if cmp.Equal(item.Spec, k8sResource.Spec) {
-		// No diff with existing resource, exiting without error
-		rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision equal: %s", rm.request.NamespacedName, namespacedName))
-
-		return k8sResource, false, nil
-	}
-
-	rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision different: %s", rm.request.NamespacedName, namespacedName))
-
-	if err := rm.validateRolePolicyRefs(awsIAMProvision, item); err != nil {
-		return nil, false, err
-	}
-
-	// Update role with new values
-	k8sResource.Spec = item.Spec
-
-	if err := rm.client.Update(*rm.context, k8sResource); err != nil {
-		return nil, false, err
-	}
-
-	rm.logger.Info(fmt.Sprintf("IAM Role of %s AWSIAMProvision updated: %s", rm.request.NamespacedName, namespacedName))
-
-	return k8sResource, true, nil
-}
-
-func (rm *ReconciliationManager) updateCRDStatus(awsIAMProvision *iamv1alpha1.AWSIAMProvision, phase, message string, roleStatuses map[string]*iamctrlv1alpha1.RoleStatus) error {
-	awsIAMProvision.Status.LastUpdatedTime = &metav1.Time{Time: time.Now()}
-	awsIAMProvision.Status.Phase = phase
-	awsIAMProvision.Status.Message = message
-
-	if roleStatuses != nil {
-		statusRoles := make(map[string]iamv1alpha1.AWSIAMProvisionStatusRole)
-
-		for roleName, roleStatus := range roleStatuses {
-			statusRolePhase := "Provisioned"
-			statusRoleMessage := ""
-
-			for _, condition := range roleStatus.Conditions {
-				// if any of roleStatus.condition.Status is not True, then the overall roleStatus.phase is considered Failed
-				if condition.Status != v1.ConditionTrue {
-					statusRolePhase = "Failed"
-					statusRoleMessage = *condition.Message
-
-					break
-				}
-			}
-
-			statusRoles[roleName] = iamv1alpha1.AWSIAMProvisionStatusRole{
-				Phase:   statusRolePhase,
-				Message: statusRoleMessage,
-				Status:  *roleStatus,
-			}
-		}
-
-		awsIAMProvision.Status.Roles = statusRoles
-	}
-
-	if err := rm.status.Update(*rm.context, awsIAMProvision); err != nil {
-		return errors.New(fmt.Sprintf("Unable to update status for CRD: %s, error: %s", awsIAMProvision.Name, err))
-	}
-
-	return nil
-}
-
-func (rm *ReconciliationManager) validateRolePolicyRefs(awsIAMProvision *iamv1alpha1.AWSIAMProvision, item *iamv1alpha1.AWSIAMProvisionRole) error {
-	for _, policyRef := range item.Spec.PolicyRefs {
-		// Check IAM policy exists
-		_, err := rm.getPolicy(awsIAMProvision, item, policyRef)
-
-		if err != nil {
-			if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
-				return err
-			}
-
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (rm *ReconciliationManager) getPolicy(awsIAMProvision *iamv1alpha1.AWSIAMProvision, item *iamv1alpha1.AWSIAMProvisionRole, policyRef *ackv1alpha1.AWSResourceReferenceWrapper) (*iamctrlv1alpha1.Policy, error) {
-	k8sResource := &iamctrlv1alpha1.Policy{}
-	namespacedName := types.NamespacedName{Name: *policyRef.From.Name, Namespace: *policyRef.From.Namespace}
-
-	if err := rm.client.Get(*rm.context, namespacedName, k8sResource); err != nil {
-		if k8serrors.IsNotFound(err) {
-			err = errors.New(fmt.Sprintf("IAM Policy of %s IAM Role of %s AWSIAMProvision not found: %s", *item.Spec.Name, rm.request.NamespacedName, namespacedName))
-		}
-
-		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
+		if err := rm.updateCRDStatus(air, failPhase, "", err.Error(), nil); err != nil {
 			return nil, err
 		}
 
 		return nil, err
 	}
 
-	return k8sResource, nil
+	if !air.eksCP.Status.Ready {
+		msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not ready: %s",
+			rm.request.NamespacedName, air.eksCPNamespace)
+		rm.logger.Info(msg)
+		if err := rm.updateCRDStatus(air, provisionIntermediatePhase, "", msg, nil); err != nil {
+			return nil, err
+		}
+
+		return nil, nil
+	}
+
+	return air, nil
 }
 
-func (rm *ReconciliationManager) setDefaultValues(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, item *iamv1alpha1.AWSIAMProvisionRole) error {
-	// Set default values to prevent unwanted diffs (the logic is similar to aws-iam-controller)
-	if item.Spec.MaxSessionDuration == nil {
-		defaultMaxSessionDuration := int64(3600)
-		item.Spec.MaxSessionDuration = &defaultMaxSessionDuration
-	}
+func (rm *ReconciliationManager) deleteIAMResources(awsIAMProvision *iamv1alpha1.AWSIAMProvision) error {
+	for _, role := range awsIAMProvision.Spec.Roles {
+		_, exists, err := rm.IAMClient.GetRoleByName(role.Spec.Name)
+		if err != nil {
+			return err
+		}
 
-	if item.Spec.Path == nil {
-		defaultPath := "/"
-		item.Spec.Path = &defaultPath
-	}
+		if exists {
+			policies, err := rm.IAMClient.ListAttachedRolePolicies(role.Spec.Name)
+			if err != nil {
+				return err
+			}
 
-	// Set rendered template to detect the diff correctly
-	if err := rm.setAssumeRolePolicyDocument(awsIAMProvision, eksControlPlane, item); err != nil {
-		return err
+			if err := rm.IAMClient.BatchAttachDetachRolePolicies(aws_sdk.ButchDetachProc, policies, role.Spec.Name); err != nil {
+				return err
+			}
+
+			if err := rm.IAMClient.BatchDeletePolicies(policies); err != nil {
+				return err
+			}
+
+			if err := rm.IAMClient.DeleteRole(role.Spec.Name); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
 }
 
-func (rm *ReconciliationManager) setAssumeRolePolicyDocument(awsIAMProvision *iamv1alpha1.AWSIAMProvision, eksControlPlane *ekscontrolplanev1.AWSManagedControlPlane, item *iamv1alpha1.AWSIAMProvisionRole) error {
-	oidcProviderARN := eksControlPlane.Status.OIDCProvider.ARN
-	_, oidcProviderName, oidcProviderARNFound := strings.Cut(oidcProviderARN, "/")
+func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error {
+	tags := aws_sdk.TagsDefine(air.awsIAMProvision.Spec.EKSClusterName, air.awsIAMProvision.Namespace)
+
+	iamRoles, err := rm.IAMClient.ListRolesByTags(tags)
+	if err != nil {
+		return err
+	}
+
+	iamPolicies, err := rm.IAMClient.ListPoliciesByTags(tags)
+	if err != nil {
+		return err
+	}
+
+	deleteRoles := make(map[string]struct{})
+	for _, iamRole := range iamRoles {
+		deleteRoles[*iamRole.RoleName] = struct{}{}
+	}
+
+	for _, role := range air.awsIAMProvision.Spec.Roles {
+		if _, ok := deleteRoles[*role.Spec.Name]; ok {
+			delete(deleteRoles, *role.Spec.Name)
+		}
+
+		detachRolePolicies := make(map[string]struct{})
+		for _, iamPolicy := range iamPolicies {
+			entities, err := rm.IAMClient.ListEntitiesForPolicy(&iamPolicy)
+			if err != nil {
+				return err
+			}
+
+			for _, entity := range entities {
+				if *role.Spec.Name == *entity.RoleName {
+					detachRolePolicies[*iamPolicy.PolicyName] = struct{}{}
+				}
+			}
+		}
+
+		for _, rolePolicy := range role.Spec.Policies {
+			if _, ok := detachRolePolicies[*rolePolicy]; ok {
+				delete(detachRolePolicies, *rolePolicy)
+			}
+		}
+
+		for detachRolePolicy := range detachRolePolicies {
+			if err := rm.IAMClient.DetachRolePolicy(&detachRolePolicy, role.Spec.Name); err != nil {
+				return err
+			}
+
+			if err := rm.updateCRDStatus(air, provisionPhase, detachPhase,
+				fmt.Sprintf("Policy %s was detached from role %s.", detachRolePolicy, *role.Spec.Name),
+				&iamType.Policy{PolicyName: &detachRolePolicy}); err != nil {
+				return err
+			}
+		}
+	}
+
+	for role := range deleteRoles {
+		iamRole, exists, err := rm.IAMClient.GetRoleByName(&role)
+		if err != nil {
+			return err
+		}
+
+		if exists {
+			policies, err := rm.IAMClient.ListAttachedRolePolicies(&role)
+			if err != nil {
+				return err
+			}
+
+			for _, policy := range policies {
+				if err := rm.IAMClient.DetachRolePolicy(policy.PolicyName, &role); err != nil {
+					return err
+				}
+
+				if err := rm.updateCRDStatus(air, provisionPhase, detachPhase,
+					fmt.Sprintf("Policy %s was detached from role %s.", *policy.PolicyName, role),
+					&policy); err != nil {
+					return err
+				}
+			}
+
+			if err := rm.IAMClient.DeleteRole(&role); err != nil {
+				return err
+			}
+
+			if err := rm.updateCRDStatus(air, provisionPhase, deletePhase,
+				fmt.Sprintf("Role %s was deleted.", *iamRole.RoleName), iamRole); err != nil {
+				return err
+			}
+		}
+	}
+
+	deletePolicies := make(map[string]struct{})
+	for _, iamPolicy := range iamPolicies {
+		deletePolicies[*iamPolicy.PolicyName] = struct{}{}
+	}
+
+	for _, policy := range air.awsIAMProvision.Spec.Policies {
+		if _, ok := deletePolicies[*policy.Spec.Name]; ok {
+			delete(deletePolicies, *policy.Spec.Name)
+		}
+	}
+
+	for policyName := range deletePolicies {
+		policy, exists, err := rm.IAMClient.GetPolicyByName(&policyName)
+		if err != nil {
+			return err
+		}
+
+		if exists {
+			entities, err := rm.IAMClient.ListEntitiesForPolicy(policy)
+			if err != nil {
+				return err
+			}
+
+			if len(entities) == 0 {
+				if err := rm.IAMClient.DeletePolicy(policy.PolicyName); err != nil {
+					return err
+				}
+
+				if err := rm.updateCRDStatus(air, provisionPhase, deletePhase,
+					fmt.Sprintf("Policy %s was deleted.", *policy.PolicyName), policy); err != nil {
+					return err
+				}
+			}
+
+			for _, role := range entities {
+				if len(*role.RoleName) > 0 {
+					if err := rm.IAMClient.DetachRolePolicy(policy.PolicyName, role.RoleName); err != nil {
+						return err
+					}
+
+					if err := rm.IAMClient.DeletePolicy(policy.PolicyName); err != nil {
+						return err
+					}
+
+					if err := rm.updateCRDStatus(air, provisionPhase, deletePhase,
+						fmt.Sprintf("Policy %s was deleted.", *policy.PolicyName), policy); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (rm *ReconciliationManager) syncPoliciesByRoleSpec(air *awsIAMResources, role *iamv1alpha1.AWSIAMProvisionRole) error {
+	for _, rolePolicy := range role.Spec.Policies {
+		for _, policy := range air.awsIAMProvision.Spec.Policies {
+			// Coordination of the list `spec.role.spec.policies` with list `spec.policies`.
+			if *rolePolicy == *policy.Spec.Name {
+				iamPolicy, exists, err := rm.IAMClient.GetPolicyByName(policy.Spec.Name)
+				if err != nil {
+					return err
+				}
+
+				checkSumTag := aws_sdk.NewChecksumTag(policy.Spec.PolicyDocument)
+				tags := aws_sdk.TagsDefine(
+					air.awsIAMProvision.Spec.EKSClusterName,
+					air.awsIAMProvision.Namespace,
+					append(aws_sdk.ConvertToIAMTags(policy.Spec.Tags), checkSumTag)...,
+				)
+				description := fmt.Sprintf("%s%s. %s",
+					aws_sdk.PolicyDescriptionPrefix, air.awsIAMProvision.Spec.EKSClusterName, aws_sdk.IAMDescription)
+				// Creating and attaching policy if not created early.
+				if !exists {
+					result, err := rm.IAMClient.CreatePolicy(policy.Spec.Name, policy.Spec.PolicyDocument, &description, tags)
+					if err != nil {
+						return err
+					}
+
+					if err := rm.IAMClient.AttachRolePolicy(policy.Spec.Name, role.Spec.Name); err != nil {
+						return err
+					}
+
+					if err := rm.updateCRDStatus(air, provisionPhase, createPhase+attachPhase,
+						fmt.Sprintf("Policy %s was created and attached to role %s.",
+							*policy.Spec.Name, *role.Spec.Name), result); err != nil {
+						return err
+					}
+				} else {
+					// Updating policy document if was changed
+					for _, tag := range iamPolicy.Tags {
+						if *tag.Key == aws_sdk.TagKeyPolicyDocument && *tag.Value != *checkSumTag.Value {
+							if err := rm.IAMClient.DetachRolePolicy(iamPolicy.PolicyName, role.Spec.Name); err != nil {
+								return err
+							}
+
+							if err := rm.IAMClient.DeletePolicy(iamPolicy.PolicyName); err != nil {
+								return err
+							}
+
+							_, err := rm.IAMClient.CreatePolicy(policy.Spec.Name, policy.Spec.PolicyDocument, &description, tags)
+							if err != nil {
+								return err
+							}
+
+							if err := rm.IAMClient.AttachRolePolicy(policy.Spec.Name, role.Spec.Name); err != nil {
+								return err
+							}
+
+							if err := rm.updateCRDStatus(air, provisionPhase, updatePhase,
+								fmt.Sprintf("Policy document for policy %s was updated.",
+									*policy.Spec.Name), iamPolicy); err != nil {
+								return err
+							}
+						}
+					}
+
+					// Sync attachment the policies by list of `spec.role.spec.policies`.
+					roleIAMPolicies, err := rm.IAMClient.ListAttachedRolePolicies(role.Spec.Name)
+					if err != nil {
+						return err
+					}
+
+					isAttachedToRole := make(map[string]struct{})
+					for _, roleIAMPolicy := range roleIAMPolicies {
+						isAttachedToRole[*roleIAMPolicy.PolicyName] = struct{}{}
+					}
+
+					if _, ok := isAttachedToRole[*rolePolicy]; !ok {
+						if err := rm.IAMClient.AttachRolePolicy(policy.Spec.Name, role.Spec.Name); err != nil {
+							return err
+						}
+
+						if err := rm.updateCRDStatus(air, provisionPhase, attachPhase,
+							fmt.Sprintf("Policy %s was attached to role %s.",
+								*policy.Spec.Name, *role.Spec.Name), iamPolicy); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (rm *ReconciliationManager) syncRole(air *awsIAMResources, role *iamv1alpha1.AWSIAMProvisionRole) error {
+	tags := aws_sdk.TagsDefine(
+		air.awsIAMProvision.Spec.EKSClusterName,
+		air.awsIAMProvision.Namespace,
+		aws_sdk.ConvertToIAMTags(role.Spec.Tags)...)
+
+	if err := rm.setAssumeRolePolicyDocument(air, role); err != nil {
+		return err
+	}
+
+	iamRole, exists, err := rm.IAMClient.GetRoleByName(role.Spec.Name)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		description := fmt.Sprintf("%s%s. %s",
+			aws_sdk.RoleDescriptionPrefix, air.awsIAMProvision.Spec.EKSClusterName, aws_sdk.IAMDescription)
+		result, err := rm.IAMClient.CreateRole(role.Spec.Name, role.Spec.AssumeRolePolicyDocument, &description, tags)
+		if err != nil {
+			return err
+		}
+
+		if err := rm.updateCRDStatus(air, provisionPhase, createPhase,
+			fmt.Sprintf("Role %s was created.", *role.Spec.Name), result); err != nil {
+			return err
+		}
+
+		if err := rm.syncPoliciesByRoleSpec(air, role); err != nil {
+			return err
+		}
+	} else {
+		diff, err := rm.IAMClient.DiffRoleByPolicyDocument(iamRole.AssumeRolePolicyDocument, role.Spec.AssumeRolePolicyDocument)
+		if err != nil {
+			return err
+		}
+
+		if diff {
+			if err := rm.IAMClient.UpdateRole(role.Spec.Name, role.Spec.AssumeRolePolicyDocument); err != nil {
+				return err
+			}
+
+			if err := rm.updateCRDStatus(air, provisionPhase, updatePhase,
+				fmt.Sprintf("The trust relationship policy document for role %s was updated.",
+					*role.Spec.Name), iamRole); err != nil {
+				return err
+			}
+		}
+
+		if err := rm.syncPoliciesByRoleSpec(air, role); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (rm *ReconciliationManager) setAssumeRolePolicyDocument(air *awsIAMResources, role *iamv1alpha1.AWSIAMProvisionRole) error {
+	var oidcProviderARNFound bool
+
+	oidcPr := &oidcProviderTemplateData{OIDCProviderARN: air.eksCP.Status.OIDCProvider.ARN}
+	_, oidcPr.OIDCProviderName, oidcProviderARNFound = strings.Cut(oidcPr.OIDCProviderARN, "/")
 
 	if !oidcProviderARNFound {
-		namespacedName := types.NamespacedName{Name: awsIAMProvision.Spec.EksClusterName, Namespace: rm.request.NamespacedName.Namespace}
-		err := errors.New(fmt.Sprintf("OIDC ARN of %s AWSManagedControlPlane of %s AWSIAMProvision malformed: %s", namespacedName, rm.request.NamespacedName, oidcProviderARN))
-
-		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
+		err := fmt.Errorf("OIDC ARN of %s AWSManagedControlPlane of %s AWSIAMProvision malformed: %s",
+			air.eksCPNamespace, rm.request.NamespacedName, oidcPr.OIDCProviderARN)
+		if err := rm.updateCRDStatus(air, failPhase, "", err.Error(), nil); err != nil {
 			return err
 		}
 
 		return err
 	}
 
-	if assumeRolePolicyDocument, err := rm.renderOIDCProviderTemplate(*item.Spec.AssumeRolePolicyDocument, oidcProviderARN, oidcProviderName); err != nil {
-		if err := rm.updateCRDStatus(awsIAMProvision, "Failed", err.Error(), nil); err != nil {
+	if assumeRolePolicyDocument, err := rm.renderOIDCProviderTemplate(*role.Spec.AssumeRolePolicyDocument, oidcPr); err != nil {
+		if err := rm.updateCRDStatus(air, failPhase, "", err.Error(), nil); err != nil {
 			return err
 		}
 
 		return err
 	} else {
-		item.Spec.AssumeRolePolicyDocument = &assumeRolePolicyDocument
+		role.Spec.AssumeRolePolicyDocument = &assumeRolePolicyDocument
 
 		return nil
 	}
 }
 
-func (rm *ReconciliationManager) renderOIDCProviderTemplate(oidcProviderTemplate, oidcProviderARN, oidcProviderName string) (string, error) {
-	oidcProviderTemplateData := oidcProviderTemplateData{oidcProviderARN, oidcProviderName}
-
-	tmpl, err := template.New("").Parse(oidcProviderTemplate)
+func (rm *ReconciliationManager) renderOIDCProviderTemplate(assumeRolePolicyDocument string, templateData *oidcProviderTemplateData) (string, error) {
+	tmpl, err := template.New("").Parse(assumeRolePolicyDocument)
 	if err != nil {
 		return "", err
 	}
 
 	var tmplString bytes.Buffer
-	if err := tmpl.Execute(&tmplString, oidcProviderTemplateData); err != nil {
+	if err := tmpl.Execute(&tmplString, templateData); err != nil {
 		return "", err
 	}
 
 	return tmplString.String(), nil
-}
-
-func (rm *ReconciliationManager) transformPoliciesToRefs(policies []*iamctrlv1alpha1.Policy) []*ackv1alpha1.AWSResourceReferenceWrapper {
-	var policyRefs []*ackv1alpha1.AWSResourceReferenceWrapper
-
-	for _, policy := range policies {
-		policyRefs = append(policyRefs, &ackv1alpha1.AWSResourceReferenceWrapper{
-			From: &ackv1alpha1.AWSResourceReference{
-				Name:      &policy.Name,
-				Namespace: &policy.Namespace,
-			},
-		})
-	}
-
-	return policyRefs
 }

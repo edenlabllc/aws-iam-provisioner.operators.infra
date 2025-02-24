@@ -4,7 +4,7 @@
 [![Software License](https://img.shields.io/github/license/edenlabllc/aws-iam-provisioner.operators.infra.svg?style=for-the-badge)](LICENSE)
 [![Powered By: Edenlab](https://img.shields.io/badge/powered%20by-edenlab-8A2BE2.svg?style=for-the-badge)](https://edenlab.io)
 
-The AWS IAM provisioner operator provisions IAM roles on the fly for the Kubernetes clusters
+The AWS IAM provisioner operator provisions IAM roles and policies on the fly for the Kubernetes clusters
 managed using [Kubernetes Cluster API Provider AWS](https://cluster-api-aws.sigs.k8s.io/getting-started).
 
 ## Description
@@ -15,35 +15,8 @@ to provision IAM roles and policies for the installed services,
 e.g. [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/),
 [AWS Elastic Block Store CSI driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/tree/master).
 
-For Kubernetes-based resource
-provisioning, [AWS Controllers for Kubernetes](https://aws-controllers-k8s.github.io/community/)
-can be used to provision IAM [policies](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/policy/)
-and [roles](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/).
-Custom resources (CRs) for the controller might look like the following:
-
-```yaml
-apiVersion: iam.services.k8s.aws/v1alpha1
-kind: Policy
-metadata:
-  name: deps-develop-ebs-csi-controller-core
-  namespace: capa-system
-  # truncated
-spec:
-  name: deps-develop-ebs-csi-controller-core
-  # truncated
-```
-
-```yaml
-apiVersion: iam.services.k8s.aws/v1alpha1
-kind: Role
-metadata:
-  name: deps-develop-ebs-csi-controller
-  namespace: capa-system
-  # truncated
-spec:
-  name: deps-develop-ebs-csi-controller
-  # truncated
-```
+The AWS IAM Provisioner Operator implements the creation and management of AWS IAM resources, including `roles` and `policies`, 
+based on information obtained after provisioning the target cluster via the [Kubernetes Cluster API Provider AWS.](https://cluster-api-aws.sigs.k8s.io/getting-started)
 
 While a CR of an IAM policy is a static definition, which can be defined in advance, a CR of an IAM role might contain
 dynamic parts such as OIDC ARN/name of a created EKS cluster. It means, that while a role can reference existing
@@ -63,6 +36,7 @@ metadata:
   # truncated
 spec:
   eksClusterName: deps-develop
+  region: us-east-1
   roles:
     deps-develop-ebs-csi-controller:
       spec:
@@ -85,13 +59,30 @@ spec:
               }
             ]
           }
-        maxSessionDuration: 3600
-        name: deps-develop-ebs-csi-controller
-        path: /
-        policyRefs:
-          - from:
-              name: deps-develop-ebs-csi-controller-core
-              namespace: capa-system
+        policies:
+          - deps-develop-ebs-csi-controller-core
+        tags:
+          - key: Foo
+            value: Bar
+  policies:
+    deps-develop-ebs-csi-controller-core:
+    spec:
+      name: deps-develop-ebs-csi-controller-core
+      tags:
+        - key: Foo
+          value: Bar
+      policyDocument: |
+        {
+            "Statement": [
+                {
+                    "Action": [
+                        "ec2:CreateSnapshot",
+                        "ec2:AttachVolume",
+                        "ec2:DetachVolume",
+                        "ec2:ModifyVolume",
+                        "ec2:DescribeAvailabilityZones",
+                        "ec2:DescribeInstances",
+                        "ec2:DescribeSnapshots",
   # truncated
 ```
 
@@ -105,15 +96,11 @@ The `assumeRolePolicyDocument` field of the `AWSIAMProvision` CR supports the fo
 > In this example, the `kube-system:ebs-csi-controller` part means, that the `ebs-csi-controller` K8S service account is
 > in the `kube-system` namespace.
 
-The rest of the `spec.roles.*.spec` fields are identical to the original AWS
-IAM [Role](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/).
+The rest of the `spec.roles.*.spec` fields are identical to the original AWS IAM role.
 
 The [AWSManagedControlPlane](https://cluster-api-aws.sigs.k8s.io/crd/#controlplane.cluster.x-k8s.io/v1beta2.AWSManagedControlPlane)
 Cluster API CR is watched the AWS IAM provisioner operator. As the result, a role CR will be created on the fly by the
-operator
-upon a EKS cluster provisioning.
-
-> `policyRefs` should reference existing AWS IAM `Policy` CRs created by AWS IAM Controller.
+operator upon a EKS cluster provisioning.
 
 Example of an original `AWSManagedControlPlane` resource:
 
@@ -135,54 +122,23 @@ spec:
   # truncated
 ```
 
-Example of a result AWS IAM [Role](https://aws-controllers-k8s.github.io/community/reference/iam/v1alpha1/role/) created
-by the operator:
+> `spec.roles.*.policies` should be attached to an existing AWS IAM `Policy` created by the AWS IAM Provisioner Operator.
 
-```yaml
-apiVersion: iam.services.k8s.aws/v1alpha1
-kind: Role
-metadata:
-  name: deps-develop-ebs-csi-controller
-  namespace: capa-system
-  ownerReferences:
-    - apiVersion: iam.aws.edenlab.io/v1alpha1
-      blockOwnerDeletion: true
-      controller: true
-      kind: AWSIAMProvision
-      name: deps-develop
-      uid: 77b58794-73cc-4a36-bbd9-572165ff6664
-  # truncated
-spec:
-  assumeRolePolicyDocument: |
-    {
-      "Version": "2012-10-17",
-      "Statement": [
-        {
-          "Sid": "",
-          "Effect": "Allow",
-          "Principal": {
-            "Federated": "arn:aws:iam::012345678901:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/AAAAABBBBB0000011111222223333344"
-          },
-          "Action": "sts:AssumeRoleWithWebIdentity",
-          "Condition": {
-            "StringEquals": {
-              "oidc.eks.us-east-1.amazonaws.com/id/AAAAABBBBB0000011111222223333344:sub": "system:serviceaccount:kube-system:ebs-csi-controller"
-            }
-          }
-        }
-      ]
-    }
-  maxSessionDuration: 3600
-  name: deps-develop-ebs-csi-controller
-  path: /
-  policyRefs:
-    - from:
-        name: deps-develop-ebs-csi-controller-core
-        namespace: capa-system
-  # truncated
-```
+> `spec.*.*.tags` field is used to define additional custom tags. Tags can only be specified at the time of `policy` or `role`
+> creation and cannot be updated after a resource has been created.
 
-> The `ownerReferences` field is set to define a parent-child relationship between AWSIAMProvision and the managed Role.
+### AWS IAM Provisioner Operator behavior
+
+The AWS IAM Provisioner Operator follows idempotent behavior and a declarative configuration approach.
+It continuously synchronizes `policy` or `role` resources based on the current state of AWS resources and 
+the CR configuration.
+
+Supported operations on AWS IAM Resources (`policy` or `role`):
+- Creating or deleting resources based on the CR configuration.
+- Updating the trust relationship policy document for a `role` or the `policy` document for a policy.
+- Attaching or detaching policies from roles according to the CR configuration.
+
+> [Full Example of CR Configuration](config/samples/iam_v1alpha1_awsiamprovision.yaml)
 
 ## Getting Started
 
