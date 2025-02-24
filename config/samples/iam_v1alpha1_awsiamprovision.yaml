@@ -5,7 +5,7 @@ metadata:
   namespace: capa-system
 spec:
   eksClusterName: deps-develop
-  frequency: 1m
+  frequency: 30s
   region: us-east-1
   roles:
     deps-develop-ebs-csi-controller:
@@ -36,6 +36,7 @@ spec:
   policies:
     deps-develop-ebs-csi-controller-core:
       spec:
+        name: deps-develop-ebs-csi-controller-core
         policyDocument: |
           {
               "Statement": [
@@ -184,6 +185,7 @@ spec:
           }
     deps-develop-ebs-csi-controller-kms:
       spec:
+        name: deps-develop-ebs-csi-controller-kms
         policyDocument: |
           {
               "Statement": [

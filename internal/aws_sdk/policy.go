@@ -45,14 +45,14 @@ func (c *IAMClient) CreatePolicy(policyName, policyData, description *string, ta
 			entityAlreadyExists *iamType.EntityAlreadyExistsException
 		)
 		if errors.As(err, &respError) && respError.HTTPStatusCode() == http.StatusConflict && respError.As(&entityAlreadyExists) {
-			c.Logger.Info(fmt.Sprintf("creating skipped: a policy called %s already exists", *policyName))
+			c.Logger.Info(fmt.Sprintf("policy creation skipped: %s resource already exists", *policyName))
 			return nil, nil
 		}
 
 		return nil, err
 	}
 
-	c.Logger.Info(fmt.Sprintf("created policy %s", aws.ToString(result.Policy.PolicyName)))
+	c.Logger.Info(fmt.Sprintf("created %s policy", aws.ToString(result.Policy.PolicyName)))
 
 	return result.Policy, nil
 }
@@ -67,14 +67,14 @@ func (c *IAMClient) DeletePolicy(policyName *string) error {
 			noSuchEntity *iamType.NoSuchEntityException
 		)
 		if errors.As(err, &respError) && respError.HTTPStatusCode() == http.StatusNotFound && respError.As(&noSuchEntity) {
-			c.Logger.Info(fmt.Sprintf("deleting skipped: policy %s was not found", *policyName))
+			c.Logger.Info(fmt.Sprintf("policy deletion skipped: %s resource not found", *policyName))
 			return nil
 		}
 
 		return err
 	}
 
-	c.Logger.Info(fmt.Sprintf("delete policy %s", *policyName))
+	c.Logger.Info(fmt.Sprintf("deleted %s policy", *policyName))
 
 	return nil
 }
@@ -89,7 +89,7 @@ func (c *IAMClient) GetPolicyByName(policyName *string) (*iamType.Policy, bool, 
 			noSuchEntity *iamType.NoSuchEntityException
 		)
 		if errors.As(err, &respError) && respError.HTTPStatusCode() == http.StatusNotFound && respError.As(&noSuchEntity) {
-			c.Logger.Info(fmt.Sprintf("policy %s was not found", *policyName))
+			c.Logger.Info(fmt.Sprintf("%s policy not found", *policyName))
 			return nil, false, nil
 		}
 

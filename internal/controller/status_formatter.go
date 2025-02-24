@@ -10,16 +10,19 @@ import (
 )
 
 const (
-	attachPhase              = "Attached"
-	createPhase              = "Created"
-	deletePhase              = "Deleted"
-	destroyPhase             = "Destroyed"
-	destroyIntermediatePhase = "Destroying"
-	detachPhase              = "Detached"
-	failPhase                = "Failed"
-	intermediatePhase        = "Provisioning"
-	successPhase             = "Provisioned"
-	updatePhase              = "Updated"
+	// Controller phases
+	destroyIntermediatePhase   = "Destroying"
+	destroyPhase               = "Destroyed"
+	provisionIntermediatePhase = "Provisioning"
+	provisionPhase             = "Provisioned"
+
+	// AWS IAM resources phases
+	attachPhase = "Attached"
+	createPhase = "Created"
+	deletePhase = "Deleted"
+	detachPhase = "Detached"
+	failPhase   = "Failed"
+	updatePhase = "Updated"
 )
 
 func (rm *ReconciliationManager) updateCRDStatus(air *awsIAMResources, crdPhase, phase, message string, result interface{}) error {

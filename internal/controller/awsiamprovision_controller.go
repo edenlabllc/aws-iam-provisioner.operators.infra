@@ -134,7 +134,7 @@ func (r *AWSIAMProvisionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	msg := fmt.Sprintf("AWS IAM resources synced with the remote state.")
 	r.logger.Info(msg)
 	if air.awsIAMProvision.Status.LastUpdatedTime == nil || air.awsIAMProvision.Status.Phase == "Failed" {
-		if err := r.updateCRDStatus(air, successPhase, "", msg, nil); err != nil {
+		if err := r.updateCRDStatus(air, provisionPhase, "", msg, nil); err != nil {
 			return ctrl.Result{}, err
 		}
 	}

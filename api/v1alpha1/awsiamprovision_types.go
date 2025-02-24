@@ -22,7 +22,7 @@ import (
 
 // AWSIAMProvisionSpec defines the desired state of AWSIAMProvision.
 type AWSIAMProvisionSpec struct {
-	// EKSClusterName - target cluster name provisioned Cluster API.
+	// EKSClusterName - target EKS cluster name provisioned by Cluster API.
 	EKSClusterName string `json:"eksClusterName"`
 	// Frequency - AWS IAM resources synchronization frequency.
 	// It is not recommended to set values below 30s to avoid being blocked by the AWS API.
