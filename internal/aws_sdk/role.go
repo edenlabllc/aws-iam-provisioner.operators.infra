@@ -29,7 +29,7 @@ func (c *IAMClient) AttachRolePolicy(policyName, roleName *string) error {
 		return err
 	}
 
-	c.Logger.Info(fmt.Sprintf("attached policy %s to role %s", *policyName, *roleName))
+	c.Logger.Info(fmt.Sprintf("attached %s policy to %s role", *policyName, *roleName))
 
 	return nil
 }
@@ -79,14 +79,14 @@ func (c *IAMClient) CreateRole(roleName, assumeRolePolicyDocument, description *
 			entityAlreadyExists *iamType.EntityAlreadyExistsException
 		)
 		if errors.As(err, &respError) && respError.HTTPStatusCode() == http.StatusConflict && respError.As(&entityAlreadyExists) {
-			c.Logger.Info(fmt.Sprintf("creating skipped: a role called %s already exists", *roleName))
+			c.Logger.Info(fmt.Sprintf("role creation skipped: %s resource already exists", *roleName))
 			return nil, nil
 		}
 
 		return nil, err
 	}
 
-	c.Logger.Info(fmt.Sprintf("created role %s", aws.ToString(result.Role.RoleName)))
+	c.Logger.Info(fmt.Sprintf("created %s role", aws.ToString(result.Role.RoleName)))
 
 	return result.Role, nil
 }
@@ -101,14 +101,14 @@ func (c *IAMClient) DeleteRole(roleName *string) error {
 			noSuchEntity *iamType.NoSuchEntityException
 		)
 		if errors.As(err, &respError) && respError.HTTPStatusCode() == http.StatusNotFound && respError.As(&noSuchEntity) {
-			c.Logger.Info(fmt.Sprintf("deleting skipped: policy %s was not found", *roleName))
+			c.Logger.Info(fmt.Sprintf("role deletion skipped: %s resource not found", *roleName))
 			return nil
 		}
 
 		return err
 	}
 
-	c.Logger.Info(fmt.Sprintf("delete role %s", *roleName))
+	c.Logger.Info(fmt.Sprintf("deleted %s role", *roleName))
 
 	return nil
 }
@@ -124,14 +124,14 @@ func (c *IAMClient) DetachRolePolicy(policyName, roleName *string) error {
 			noSuchEntity *iamType.NoSuchEntityException
 		)
 		if errors.As(err, &respError) && respError.HTTPStatusCode() == http.StatusNotFound && respError.As(&noSuchEntity) {
-			c.Logger.Info(fmt.Sprintf("detaching skipped: role %s was not found", *roleName))
+			c.Logger.Info(fmt.Sprintf("role detachment skipped: %s resource not found", *roleName))
 			return nil
 		}
 
 		return err
 	}
 
-	c.Logger.Info(fmt.Sprintf("detached policy %s from role %s", *policyName, *roleName))
+	c.Logger.Info(fmt.Sprintf("detached %s policy from %s role", *policyName, *roleName))
 
 	return nil
 }
@@ -160,7 +160,7 @@ func (c *IAMClient) GetRoleByName(roleName *string) (*iamType.Role, bool, error)
 			noSuchEntity *iamType.NoSuchEntityException
 		)
 		if errors.As(err, &respError) && respError.HTTPStatusCode() == http.StatusNotFound && respError.As(&noSuchEntity) {
-			c.Logger.Info(fmt.Sprintf("role %s was not found", *roleName))
+			c.Logger.Info(fmt.Sprintf("%s role not found", *roleName))
 			return nil, false, nil
 		}
 
@@ -249,14 +249,14 @@ func (c *IAMClient) UpdateRole(roleName, assumeRolePolicyDocument *string) error
 			noSuchEntity *iamType.NoSuchEntityException
 		)
 		if errors.As(err, &respError) && respError.HTTPStatusCode() == http.StatusNotFound && respError.As(&noSuchEntity) {
-			c.Logger.Info(fmt.Sprintf("updating skipped: role %s was not found", *roleName))
+			c.Logger.Info(fmt.Sprintf("role update skipped: %s resource not found", *roleName))
 			return nil
 		}
 
 		return err
 	}
 
-	c.Logger.Info(fmt.Sprintf("updated trust relationship policy document for role %s", *roleName))
+	c.Logger.Info(fmt.Sprintf("updated trust relationship policy document for %s role", *roleName))
 
 	return nil
 }

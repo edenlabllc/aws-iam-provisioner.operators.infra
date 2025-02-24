@@ -84,7 +84,7 @@ func (rm *ReconciliationManager) getClusterResources() (*awsIAMResources, error)
 			msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not found: %s",
 				rm.request.NamespacedName, air.eksCPNamespace)
 			rm.logger.Info(msg)
-			if err := rm.updateCRDStatus(air, intermediatePhase, "", msg, nil); err != nil {
+			if err := rm.updateCRDStatus(air, provisionIntermediatePhase, "", msg, nil); err != nil {
 				return nil, err
 			}
 
@@ -102,7 +102,7 @@ func (rm *ReconciliationManager) getClusterResources() (*awsIAMResources, error)
 		msg := fmt.Sprintf("AWSManagedControlPlane of %s AWSIAMProvision not ready: %s",
 			rm.request.NamespacedName, air.eksCPNamespace)
 		rm.logger.Info(msg)
-		if err := rm.updateCRDStatus(air, intermediatePhase, "", msg, nil); err != nil {
+		if err := rm.updateCRDStatus(air, provisionIntermediatePhase, "", msg, nil); err != nil {
 			return nil, err
 		}
 
@@ -190,7 +190,7 @@ func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error
 				return err
 			}
 
-			if err := rm.updateCRDStatus(air, successPhase, detachPhase,
+			if err := rm.updateCRDStatus(air, provisionPhase, detachPhase,
 				fmt.Sprintf("Policy %s was detached from role %s.", detachRolePolicy, *role.Spec.Name),
 				&iamType.Policy{PolicyName: &detachRolePolicy}); err != nil {
 				return err
@@ -215,7 +215,7 @@ func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error
 					return err
 				}
 
-				if err := rm.updateCRDStatus(air, successPhase, detachPhase,
+				if err := rm.updateCRDStatus(air, provisionPhase, detachPhase,
 					fmt.Sprintf("Policy %s was detached from role %s.", *policy.PolicyName, role),
 					&policy); err != nil {
 					return err
@@ -226,7 +226,7 @@ func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error
 				return err
 			}
 
-			if err := rm.updateCRDStatus(air, successPhase, deletePhase,
+			if err := rm.updateCRDStatus(air, provisionPhase, deletePhase,
 				fmt.Sprintf("Role %s was deleted.", *iamRole.RoleName), iamRole); err != nil {
 				return err
 			}
@@ -261,7 +261,7 @@ func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error
 					return err
 				}
 
-				if err := rm.updateCRDStatus(air, successPhase, deletePhase,
+				if err := rm.updateCRDStatus(air, provisionPhase, deletePhase,
 					fmt.Sprintf("Policy %s was deleted.", *policy.PolicyName), policy); err != nil {
 					return err
 				}
@@ -277,7 +277,7 @@ func (rm *ReconciliationManager) syncAWSIAMResources(air *awsIAMResources) error
 						return err
 					}
 
-					if err := rm.updateCRDStatus(air, successPhase, deletePhase,
+					if err := rm.updateCRDStatus(air, provisionPhase, deletePhase,
 						fmt.Sprintf("Policy %s was deleted.", *policy.PolicyName), policy); err != nil {
 						return err
 					}
@@ -318,8 +318,8 @@ func (rm *ReconciliationManager) syncPoliciesByRoleSpec(air *awsIAMResources, ro
 						return err
 					}
 
-					if err := rm.updateCRDStatus(air, successPhase, createPhase+attachPhase,
-						fmt.Sprintf("Policy %s was created and attached with role %s.",
+					if err := rm.updateCRDStatus(air, provisionPhase, createPhase+attachPhase,
+						fmt.Sprintf("Policy %s was created and attached to role %s.",
 							*policy.Spec.Name, *role.Spec.Name), result); err != nil {
 						return err
 					}
@@ -344,7 +344,7 @@ func (rm *ReconciliationManager) syncPoliciesByRoleSpec(air *awsIAMResources, ro
 								return err
 							}
 
-							if err := rm.updateCRDStatus(air, successPhase, updatePhase,
+							if err := rm.updateCRDStatus(air, provisionPhase, updatePhase,
 								fmt.Sprintf("Policy document for policy %s was updated.",
 									*policy.Spec.Name), iamPolicy); err != nil {
 								return err
@@ -368,7 +368,7 @@ func (rm *ReconciliationManager) syncPoliciesByRoleSpec(air *awsIAMResources, ro
 							return err
 						}
 
-						if err := rm.updateCRDStatus(air, successPhase, attachPhase,
+						if err := rm.updateCRDStatus(air, provisionPhase, attachPhase,
 							fmt.Sprintf("Policy %s was attached to role %s.",
 								*policy.Spec.Name, *role.Spec.Name), iamPolicy); err != nil {
 							return err
@@ -405,7 +405,7 @@ func (rm *ReconciliationManager) syncRole(air *awsIAMResources, role *iamv1alpha
 			return err
 		}
 
-		if err := rm.updateCRDStatus(air, successPhase, createPhase,
+		if err := rm.updateCRDStatus(air, provisionPhase, createPhase,
 			fmt.Sprintf("Role %s was created.", *role.Spec.Name), result); err != nil {
 			return err
 		}
@@ -424,7 +424,7 @@ func (rm *ReconciliationManager) syncRole(air *awsIAMResources, role *iamv1alpha
 				return err
 			}
 
-			if err := rm.updateCRDStatus(air, successPhase, updatePhase,
+			if err := rm.updateCRDStatus(air, provisionPhase, updatePhase,
 				fmt.Sprintf("The trust relationship policy document for role %s was updated.",
 					*role.Spec.Name), iamRole); err != nil {
 				return err
@@ -468,14 +468,14 @@ func (rm *ReconciliationManager) setAssumeRolePolicyDocument(air *awsIAMResource
 	}
 }
 
-func (rm *ReconciliationManager) renderOIDCProviderTemplate(assumeRolePolicyDocument string, oidcPr *oidcProviderTemplateData) (string, error) {
+func (rm *ReconciliationManager) renderOIDCProviderTemplate(assumeRolePolicyDocument string, templateData *oidcProviderTemplateData) (string, error) {
 	tmpl, err := template.New("").Parse(assumeRolePolicyDocument)
 	if err != nil {
 		return "", err
 	}
 
 	var tmplString bytes.Buffer
-	if err := tmpl.Execute(&tmplString, oidcPr); err != nil {
+	if err := tmpl.Execute(&tmplString, templateData); err != nil {
 		return "", err
 	}
 

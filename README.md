@@ -15,7 +15,7 @@ to provision IAM roles and policies for the installed services,
 e.g. [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/),
 [AWS Elastic Block Store CSI driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/tree/master).
 
-The AWS IAM Provisioner Operator enables the creation and management of AWS IAM resources, including `roles` and `policies`, 
+The AWS IAM Provisioner Operator implements the creation and management of AWS IAM resources, including `roles` and `policies`, 
 based on information obtained after provisioning the target cluster via the [Kubernetes Cluster API Provider AWS.](https://cluster-api-aws.sigs.k8s.io/getting-started)
 
 While a CR of an IAM policy is a static definition, which can be defined in advance, a CR of an IAM role might contain
@@ -96,7 +96,7 @@ The `assumeRolePolicyDocument` field of the `AWSIAMProvision` CR supports the fo
 > In this example, the `kube-system:ebs-csi-controller` part means, that the `ebs-csi-controller` K8S service account is
 > in the `kube-system` namespace.
 
-The rest of the `spec.roles.*.spec` fields are identical to the original AWS IAM role name.
+The rest of the `spec.roles.*.spec` fields are identical to the original AWS IAM role.
 
 The [AWSManagedControlPlane](https://cluster-api-aws.sigs.k8s.io/crd/#controlplane.cluster.x-k8s.io/v1beta2.AWSManagedControlPlane)
 Cluster API CR is watched the AWS IAM provisioner operator. As the result, a role CR will be created on the fly by the
@@ -124,17 +124,17 @@ spec:
 
 > `spec.roles.*.policies` should be attached to an existing AWS IAM `Policy` created by the AWS IAM Provisioner Operator.
 
-> `spec.*.*.tags` field is used to define additional custom tags. Tags can only be specified at the time of resource 
-> creation `policy` or `role` and cannot be updated after the resource has been created.
+> `spec.*.*.tags` field is used to define additional custom tags. Tags can only be specified at the time of `policy` or `role`
+> creation and cannot be updated after a resource has been created.
 
 ### AWS IAM Provisioner Operator behavior
 
-The AWS IAM Provisioner Operator follows idempotent behavior and a declarative configuration approach. 
-It continuously synchronizes AWS IAM resources `policy` or `role` based on the current state of real AWS IAM resources 
-and the CR configuration.
+The AWS IAM Provisioner Operator follows idempotent behavior and a declarative configuration approach.
+It continuously synchronizes `policy` or `role` resources based on the current state of AWS resources and 
+the CR configuration.
 
-Supported Operations on AWS IAM Resources (policy or role):
-- Creation or deletion based on the CR configuration.
+Supported operations on AWS IAM Resources (`policy` or `role`):
+- Creating or deleting resources based on the CR configuration.
 - Updating the trust relationship policy document for a `role` or the `policy` document for a policy.
 - Attaching or detaching policies from roles according to the CR configuration.
 
