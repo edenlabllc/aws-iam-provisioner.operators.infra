@@ -40,4 +40,3 @@ jobs:
           ecr_repository_name_prefix: core.
           image_delete: false
           image_scan: false
-
