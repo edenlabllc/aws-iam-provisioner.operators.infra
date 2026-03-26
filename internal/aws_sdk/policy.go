@@ -130,7 +130,7 @@ func (c *IAMClient) ListPoliciesByTags(tags []iamType.Tag) ([]iamType.Policy, er
 					policies = append(policies, policy)
 				}
 				// Small delay to avoid AWS IAM throttling due to burst requests within reconcile loop
-				time.Sleep(smallDelay)
+				time.Sleep(requestDelay)
 			}
 		}
 	}

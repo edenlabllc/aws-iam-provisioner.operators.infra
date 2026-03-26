@@ -16,7 +16,7 @@ import (
 const (
 	IAMDescription = `Do not change the tag values, as this may affect work of the operator. If you need to add tags, do so through the AWSIAMProvision custom resource.`
 	pathPrefix     = "/aws-iam-provisioner/"
-	smallDelay     = 20 * time.Millisecond
+	requestDelay   = 20 * time.Millisecond
 )
 
 type IAMManager interface {

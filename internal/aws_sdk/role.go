@@ -233,7 +233,7 @@ func (c *IAMClient) ListRolesByTags(tags []iamType.Tag) ([]iamType.Role, error) 
 					roles = append(roles, role)
 				}
 				// Small delay to avoid AWS IAM throttling due to burst requests within reconcile loop
-				time.Sleep(smallDelay)
+				time.Sleep(requestDelay)
 			}
 		}
 	}
