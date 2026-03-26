@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
@@ -128,6 +129,8 @@ func (c *IAMClient) ListPoliciesByTags(tags []iamType.Tag) ([]iamType.Policy, er
 				if compareTags(similarTags, tags) {
 					policies = append(policies, policy)
 				}
+				// Small delay to avoid AWS IAM throttling due to burst requests within reconcile loop
+				time.Sleep(smallDelay)
 			}
 		}
 	}

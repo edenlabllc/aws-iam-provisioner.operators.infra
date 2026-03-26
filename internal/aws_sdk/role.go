@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
@@ -231,6 +232,8 @@ func (c *IAMClient) ListRolesByTags(tags []iamType.Tag) ([]iamType.Role, error) 
 				if compareTags(similarTags, tags) {
 					roles = append(roles, role)
 				}
+				// Small delay to avoid AWS IAM throttling due to burst requests within reconcile loop
+				time.Sleep(smallDelay)
 			}
 		}
 	}

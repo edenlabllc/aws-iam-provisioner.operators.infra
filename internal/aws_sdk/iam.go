@@ -1,7 +1,10 @@
 package aws_sdk
 
 import (
+	"time"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamType "github.com/aws/aws-sdk-go-v2/service/iam/types"
@@ -13,6 +16,7 @@ import (
 const (
 	IAMDescription = `Do not change the tag values, as this may affect work of the operator. If you need to add tags, do so through the AWSIAMProvision custom resource.`
 	pathPrefix     = "/aws-iam-provisioner/"
+	smallDelay     = 20 * time.Millisecond
 )
 
 type IAMManager interface {
@@ -49,9 +53,17 @@ type IAMClientMetadata struct {
 
 func NewIAMClient(region string, logger logr.Logger) (*IAMClient, error) {
 	ctx := context.TODO()
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region), config.WithRetryer(
+		func() aws.Retryer {
+			return retry.NewStandard(func(o *retry.StandardOptions) { o.MaxAttempts = 10 })
+		},
+	))
 	if err != nil {
 		return nil, err
+	}
+
+	if _, ok := cfg.Credentials.(*aws.CredentialsCache); ok {
+		cfg.Credentials.(*aws.CredentialsCache).Invalidate()
 	}
 
 	identity, err := sts.NewFromConfig(cfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
